@@ -53,6 +53,17 @@ public class UserService {
             }
             throw exception;
         }
+        Address address = new Address();
+        address.setUser(user);
+        address.setAddressAlias("기본");
+        address.setRecipientName(request.name());
+        address.setRecipientPhone(request.phoneNumber());
+        address.setPostalCode(request.defaultAddress().zonecode());
+        address.setRoadAddress(request.defaultAddress().roadAddress());
+        address.setDetailAddress(request.defaultAddress().detailAddress());
+        address.setDefault(true);
+        address.setCreatedAt(time);
+        addresses.saveAndFlush(address);
         return new SignupResponse((long) user.getUserId(), user.getEmail(), user.getName(),
             user.getRole().name(), user.isDeleted());
     }
