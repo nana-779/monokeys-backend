@@ -78,6 +78,45 @@ class MemberIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='keyboard_shop'", Integer.class)).isEqualTo(19);
     }
 
+    @Test void signupEndpointSavesHashedPasswordAndDefaultAddress() throws Exception {
+        secured.perform(post("/api/users/signup").contentType("application/json").characterEncoding("UTF-8").content(json()))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.email").value(email)).andExpect(jsonPath("$.data.password").doesNotExist());
+        String hash = jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email);
+        assertThat(new BCryptPasswordEncoder().matches(password, hash)).isTrue();
+        var address = jdbc.queryForMap("SELECT a.* FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=?", email);
+        assertThat(address.get("postal_code")).isEqualTo("04524");
+        assertThat(address.get("address_alias")).isEqualTo("기본");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=? AND a.is_default=1", Integer.class, email)).isEqualTo(1);
+    }
+
+    @Test void validatesSignupAndRejectsDuplicateEmail() throws Exception {
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json().replace("Keyboard123", "short1")))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json().replace("04524", "123456")))
+            .andExpect(status().isBadRequest());
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json().replace("\"privacyPolicy\":true", "\"privacyPolicy\":false")))
+            .andExpect(status().isBadRequest());
+        service.signup(valid());
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json()))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.success").value(false));
+        secured.perform(get("/api/auth/check-email").param("email", email))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(false));
+    }
+
+    @Test void supportsFlatSignupAndRejectsConflictingFormats() throws Exception {
+        String flat = """
+            {"email":"%s","password":"Keyboard123","name":"회원","phone":"01012345678",
+             "postalCode":"04524","address":"서울 세종대로","detailAddress":"101호",
+             "termsConsent":{"serviceTerms":true,"privacyPolicy":true}}
+            """.formatted(email);
+        secured.perform(post("/api/users/signup").contentType("application/json").content(flat))
+            .andExpect(status().isCreated());
+        // 충돌하는 입력은 DTO 생성에서 거부합니다.
+        assertThatThrownBy(() -> SignupRequest.fromJson(email,password,"회원","01012345678",
+            null,valid().termsConsent(),"01012345678",null,null,null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test void validatesDatabaseLengthsPhoneAndPasswordByteLimit() {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             var validator = factory.getValidator();
@@ -93,19 +132,12 @@ class MemberIntegrationTests {
         }
     }
 
-    @Test void validatesSignupAndRejectsDuplicateEmail() throws Exception {
-        secured.perform(get("/api/auth/check-email").param("email", email))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(true));
-    }
-
-    @Test void signupEndpointSavesHashedPasswordAndDefaultAddress() throws Exception {
-        service.signup(valid());
-        String hash = jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email);
-        assertThat(new BCryptPasswordEncoder().matches(password, hash)).isTrue();
-        var address = jdbc.queryForMap("SELECT a.* FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=?", email);
-        assertThat(address.get("postal_code")).isEqualTo("04524");
-        assertThat(address.get("address_alias")).isEqualTo("기본");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=? AND a.is_default=1", Integer.class, email)).isEqualTo(1);
+    @Test void malformedAndConflictingJsonUseTeamErrorResponse() throws Exception {
+        secured.perform(post("/api/users/signup").contentType("application/json").content("{"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
+        secured.perform(post("/api/users/signup").contentType("application/json")
+            .content(json().replace("\"phoneNumber\":", "\"phone\":\"01012345678\",\"phoneNumber\":")))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
     }
 
     @Test void addressFailureRollsBackBothUserAndAddress() {

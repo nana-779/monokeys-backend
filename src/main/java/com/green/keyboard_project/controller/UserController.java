@@ -10,7 +10,11 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
     private final UserService users;
     public UserController(UserService users) { this.users = users; }
-
+    @PostMapping("/api/users/signup")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
+        return ApiResponse.ok(users.signup(request));
+    }
     @GetMapping("/api/auth/check-email")
     public ApiResponse<EmailAvailabilityResponse> checkEmail(@Valid @ModelAttribute SignupEmailRequest request) {
         return ApiResponse.ok(new EmailAvailabilityResponse(users.isEmailAvailable(request.email())));
