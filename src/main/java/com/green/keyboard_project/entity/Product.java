@@ -48,6 +48,7 @@ public class Product {
     private boolean isActive;
 
     @Column(name = "version", nullable = false)
+    @Version
     private int version;
 
     @Column(name = "created_at", nullable = false)

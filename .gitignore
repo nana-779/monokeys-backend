@@ -36,3 +36,9 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Sensitive Information / DB Secret ###
+**/application-secret.properties
+**/application-local.properties
+.env
+.env.*
