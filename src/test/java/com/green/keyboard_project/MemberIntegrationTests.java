@@ -102,5 +102,16 @@ class MemberIntegrationTests {
         service.signup(valid());
         String hash = jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email);
         assertThat(new BCryptPasswordEncoder().matches(password, hash)).isTrue();
+        var address = jdbc.queryForMap("SELECT a.* FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=?", email);
+        assertThat(address.get("postal_code")).isEqualTo("04524");
+        assertThat(address.get("address_alias")).isEqualTo("기본");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=? AND a.is_default=1", Integer.class, email)).isEqualTo(1);
+    }
+
+    @Test void addressFailureRollsBackBothUserAndAddress() {
+        assertThatThrownBy(() -> service.signup(request(email,password,
+            new AddressRequest("123456", "도로", "상세")))).isInstanceOf(RuntimeException.class);
+        TestTransaction.end();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE email=?",Integer.class,email)).isZero();
     }
 }
