@@ -48,6 +48,7 @@ public class UserService {
         user.setDeleted(true);
         user.setDeletedAt(now());
         user.setUpdatedAt(user.getDeletedAt());
+        auth.revokeRefreshTokens(userId);
     }
 
     private WithdrawalAuth requirePasswordMember(User user) {

@@ -140,5 +140,16 @@ class MemberIntegrationTests {
         assertThat(new BCryptPasswordEncoder().matches(password,user.getPassword())).isFalse();
         users.flush();
         assertThat(jdbc.queryForObject("SELECT is_deleted FROM users WHERE user_id=?",Integer.class,id)).isEqualTo(1);
+        verify(auth).revokeRefreshTokens(id);
+    }
+
+    @Test void revocationFailureRollsBackAccountChanges() {
+        int id = createMember();
+        given(auth.isPasswordMember(id)).willReturn(true);
+        doThrow(new IllegalStateException("revocation unavailable")).when(auth).revokeRefreshTokens(id);
+        assertThatThrownBy(() -> service.withdraw(id,password)).isInstanceOf(IllegalStateException.class);
+        // 테스트 회원 생성과 탈퇴가 같은 트랜잭션에 있으므로 전체 롤백 후 회원이 남지 않아야 합니다.
+        TestTransaction.end();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE user_id=?",Integer.class,id)).isZero();
     }
 }

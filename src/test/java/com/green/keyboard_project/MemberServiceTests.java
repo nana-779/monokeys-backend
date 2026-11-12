@@ -44,5 +44,6 @@ class MemberServiceTests {
         assertThatThrownBy(() -> service.withdraw(7,"Wrong123")).isInstanceOf(AuthorizationFailureException.class);
         assertThat(user.isDeleted()).isFalse();
         assertThat(user.getEmail()).isEqualTo("member@example.com");
+        verify(auth,never()).revokeRefreshTokens(anyInt());
     }
 }
