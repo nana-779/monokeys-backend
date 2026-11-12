@@ -22,5 +22,10 @@ public class UserController {
         @Valid @RequestBody WithdrawalPasswordRequest request) {
         return ApiResponse.ok(new WithdrawalPasswordResponse(users.verifyPassword(userId(principal), request.password())));
     }
-
+    @DeleteMapping("/api/users/me")
+    public ApiResponse<Void> withdraw(@AuthenticationPrincipal WithdrawalAuth.Principal principal,
+                                     @Valid @RequestBody WithdrawalPasswordRequest request) {
+        users.withdraw(userId(principal), request.password());
+        return ApiResponse.ok();
+    }
 }

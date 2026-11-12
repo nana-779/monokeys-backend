@@ -86,6 +86,22 @@ class MemberIntegrationTests {
             .header("Access-Control-Request-Method","DELETE")).andExpect(status().isForbidden());
     }
 
+    @Test void withdrawalRoutesAreHandledByUserControllerAfterConsolidation() throws Exception {
+        var mappings = context.getBean(org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping.class)
+            .getHandlerMethods();
+        for (String path : List.of("/api/users/me/verify-password", "/api/users/me")) {
+            var matches = mappings.entrySet().stream()
+                .filter(entry -> entry.getKey().getPatternValues().contains(path)).toList();
+            assertThat(matches).hasSize(1);
+            assertThat(matches.getFirst().getValue().getBeanType())
+                .isEqualTo(com.green.keyboard_project.controller.UserController.class);
+        }
+        var controllerOnly = MockMvcBuilders.webAppContextSetup(context).build();
+        controllerOnly.perform(delete("/api/users/me").contentType("application/json").content("{"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
+        controllerOnly.perform(post("/api/users/me/verify-password").contentType("application/json").content("{"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
+    }
     @Test void blocksAnonymousAndUnimplementedCookieAuthentication() throws Exception {
         for (var request : List.of(post("/api/users/me/verify-password"),delete("/api/users/me"))) {
             secured.perform(request.contentType("application/json").content("{\"password\":\"Keyboard123\"}"))
@@ -112,16 +128,18 @@ class MemberIntegrationTests {
         verifyNoInteractions(auth);
     }
 
-    @Test void authenticatedControllerUsesPrincipalRatherThanSubmittedUserId() throws Exception {
+    @Test void authenticatedControllerWithdrawsAndRejectsDeletedAccount() throws Exception {
         int id = createMember();
         given(auth.isPasswordMember(id)).willReturn(true);
-        // 인증 필터 구현이 없으므로 컨트롤러 테스트에만 검증된 principal을 주입합니다.
         SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
             new WithdrawalAuth.Principal(id),null,List.of()));
         var controllerOnly = MockMvcBuilders.webAppContextSetup(context).build();
-        controllerOnly.perform(post("/api/users/me/verify-password").contentType("application/json")
+        controllerOnly.perform(delete("/api/users/me").contentType("application/json")
             .content("{\"password\":\"Keyboard123\"}"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data.verified").value(true));
+            .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+        assertThat(users.findById(id).orElseThrow().isDeleted()).isTrue();
+        verify(auth).revokeRefreshTokens(id);
+        assertThatThrownBy(() -> service.verifyPassword(id,password)).isInstanceOf(UnauthenticatedException.class);
     }
 
     @Test void passwordRecheckAndSoftDeleteRetainMemberRowAndInvokeRevocation() {
@@ -141,6 +159,21 @@ class MemberIntegrationTests {
         users.flush();
         assertThat(jdbc.queryForObject("SELECT is_deleted FROM users WHERE user_id=?",Integer.class,id)).isEqualTo(1);
         verify(auth).revokeRefreshTokens(id);
+    }
+
+    @Test void authenticatedControllerUsesPrincipalRatherThanSubmittedUserId() throws Exception {
+        int id = createMember();
+        given(auth.isPasswordMember(id)).willReturn(true);
+        // 인증 필터 구현이 없으므로 컨트롤러 테스트에만 검증된 principal을 주입합니다.
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+            new WithdrawalAuth.Principal(id),null,List.of()));
+        var controllerOnly = MockMvcBuilders.webAppContextSetup(context).build();
+        controllerOnly.perform(post("/api/users/me/verify-password").contentType("application/json")
+            .content("{\"password\":\"Keyboard123\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.verified").value(true));
+        controllerOnly.perform(delete("/api/users/me").contentType("application/json")
+            .content("{\"password\":\"Wrong123\"}"))
+            .andExpect(status().isForbidden()).andExpect(jsonPath("$.success").value(false));
     }
 
     @Test void revocationFailureRollsBackAccountChanges() {
