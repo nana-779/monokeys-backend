@@ -25,10 +25,6 @@ public class Product {
     @JoinColumn(name = "category_id", nullable = false)
     private Category category;
 
-    @Column(name = "part_type", nullable = false)
-    @Enumerated(EnumType.STRING)
-    private PartType partType;
-
     @Column(name = "name", nullable = false, length = 200)
     private String name;
 
@@ -57,8 +53,20 @@ public class Product {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public enum PartType {
-        HOUSING, PCB, SWITCH, KEYCAP
+    /**
+     * 카테고리 계층 구조(소분류 -> 대분류)를 기반으로 부품 구분을 동적 계산
+     */
+    public String getDerivedPartType() {
+        if (category == null) return null;
+        String parentId = (category.getParent() != null) 
+                ? category.getParent().getCategoryId() 
+                : category.getCategoryId();
+        if (parentId == null) return null;
+        
+        String lower = parentId.toLowerCase();
+        if (lower.contains("hous")) return "HOUSING";
+        if (lower.contains("switch")) return "SWITCH";
+        if (lower.contains("keycap")) return "KEYCAP";
+        return "PCB"; // keyboards, pcb
     }
-
 }

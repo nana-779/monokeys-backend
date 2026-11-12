@@ -20,6 +20,7 @@ public class ProductResponseDto {
     private String slug;
     private int basePrice;
     private String category; // 'housing' | 'keyboards' | 'switches' | 'keycaps'
+    private String partType; // 'HOUSING' | 'PCB' | 'SWITCH' | 'KEYCAP' (동적 계산)
     private String categoryId; // 'housing-alu' 등
     private String parentCategoryId; // 'housing' 등
     private String subCategoryName;

@@ -109,6 +109,7 @@ public class ProductService {
                 .slug(String.valueOf(p.getProductId()))
                 .basePrice(p.getBasePrice())
                 .category(normCategory)
+                .partType(p.getDerivedPartType())
                 .categoryId(p.getCategory() != null ? p.getCategory().getCategoryId() : null)
                 .parentCategoryId(parentId)
                 .subCategoryName(p.getCategory() != null ? p.getCategory().getName() : null)
