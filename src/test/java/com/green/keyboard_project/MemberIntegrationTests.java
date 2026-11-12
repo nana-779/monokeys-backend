@@ -97,4 +97,10 @@ class MemberIntegrationTests {
         secured.perform(get("/api/auth/check-email").param("email", email))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(true));
     }
+
+    @Test void signupEndpointSavesHashedPasswordAndDefaultAddress() throws Exception {
+        service.signup(valid());
+        String hash = jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email);
+        assertThat(new BCryptPasswordEncoder().matches(password, hash)).isTrue();
+    }
 }
