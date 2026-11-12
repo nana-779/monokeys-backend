@@ -9,6 +9,7 @@ import com.green.keyboard_project.security.JwtTokenProvider;
 import com.green.keyboard_project.security.TokenHasher;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -29,14 +30,26 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
 
+    // 없는 이메일일 때도 BCrypt 비교를 해서 응답 시간을 비슷하게 맞추기 위한 가짜 해시
+    // (응답 속도 차이로 가입된 이메일을 알아내는 타이밍 공격 방지)
+    private String dummyHash;
+
+    @PostConstruct
+    void initDummyHash() {
+        dummyHash = passwordEncoder.encode("dummy-password-for-timing");
+    }
+
     public record LoginResult(User user, String accessToken, String refreshToken) {
     }
 
     // AUTH-003 로그인: 회원 조회 → BCrypt 비교 → 탈퇴 여부 확인 → 토큰 발급
     @Transactional
     public LoginResult login(String email, String password) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UnauthenticatedException(LOGIN_FAILED));
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
+            passwordEncoder.matches(password, dummyHash); // 결과는 버리고 시간만 맞춤
+            throw new UnauthenticatedException(LOGIN_FAILED);
+        }
         if (!passwordEncoder.matches(password, user.getPassword()) || user.isDeleted()) {
             throw new UnauthenticatedException(LOGIN_FAILED);
         }
