@@ -16,6 +16,11 @@ public class UserController {
         if (principal == null) { throw new UnauthenticatedException("로그인 정보를 다시 확인해 주세요."); }
         return principal.userId();
     }
-
+    @PostMapping("/api/users/me/verify-password")
+    public ApiResponse<WithdrawalPasswordResponse> verifyPassword(
+        @AuthenticationPrincipal WithdrawalAuth.Principal principal,
+        @Valid @RequestBody WithdrawalPasswordRequest request) {
+        return ApiResponse.ok(new WithdrawalPasswordResponse(users.verifyPassword(userId(principal), request.password())));
+    }
 
 }

@@ -111,4 +111,16 @@ class MemberIntegrationTests {
             .andExpect(status().isUnauthorized());
         verifyNoInteractions(auth);
     }
+
+    @Test void authenticatedControllerUsesPrincipalRatherThanSubmittedUserId() throws Exception {
+        int id = createMember();
+        given(auth.isPasswordMember(id)).willReturn(true);
+        // 인증 필터 구현이 없으므로 컨트롤러 테스트에만 검증된 principal을 주입합니다.
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+            new WithdrawalAuth.Principal(id),null,List.of()));
+        var controllerOnly = MockMvcBuilders.webAppContextSetup(context).build();
+        controllerOnly.perform(post("/api/users/me/verify-password").contentType("application/json")
+            .content("{\"password\":\"Keyboard123\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.verified").value(true));
+    }
 }

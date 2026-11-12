@@ -26,11 +26,26 @@ public class UserService {
 
 
 
+    @Transactional(readOnly = true)
+    public boolean verifyPassword(int userId, String password) {
+        User user = users.findById(userId).orElseThrow(UserService::inactive);
+        requirePasswordMember(user);
+        return passwords.matches(password, user.getPassword());
+    }
 
 
 
+    private WithdrawalAuth requirePasswordMember(User user) {
+        if (user.isDeleted()) { throw inactive(); }
+        WithdrawalAuth auth = authentication.getIfAvailable();
+        if (auth == null) { throw new InvalidStateException("회원 인증 연동을 사용할 수 없습니다."); }
+        if (!auth.isPasswordMember(user.getUserId())) {
+            throw new AuthorizationFailureException("계정에 등록된 인증 수단으로 본인을 확인해 주세요.");
+        }
+        return auth;
+    }
 
-
-
-
+    private static UnauthenticatedException inactive() {
+        return new UnauthenticatedException("로그인 정보를 다시 확인해 주세요.");
+    }
 }
