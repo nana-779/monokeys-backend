@@ -51,7 +51,7 @@ class MemberIntegrationTests {
     @BeforeEach void setup() {
         email = "t-" + UUID.randomUUID().toString().substring(0, 12) + "@example.com";
         secured = MockMvcBuilders.webAppContextSetup(context)
-            .build();
+            .addFilters(context.getBean(FilterChainProxy.class)).build();
     }
     @AfterEach void clearSecurity() { SecurityContextHolder.clearContext(); }
 
@@ -76,6 +76,16 @@ class MemberIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("keyboard_shop");
         assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("none");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='keyboard_shop'", Integer.class)).isEqualTo(19);
+    }
+
+    @Test void preservesCredentialedCorsForMemberPathsOnly() throws Exception {
+        secured.perform(options("/api/users/signup").header("Origin","http://localhost:3000")
+            .header("Access-Control-Request-Method","POST")
+            .header("Access-Control-Request-Headers","content-type,x-csrf-token"))
+            .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Credentials","true"))
+            .andExpect(header().string("Access-Control-Allow-Origin","http://localhost:3000"));
+        secured.perform(options("/api/users/signup").header("Origin","https://untrusted.example")
+            .header("Access-Control-Request-Method","POST")).andExpect(status().isForbidden());
     }
 
     @Test void signupEndpointSavesHashedPasswordAndDefaultAddress() throws Exception {
@@ -146,4 +156,5 @@ class MemberIntegrationTests {
         TestTransaction.end();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE email=?",Integer.class,email)).isZero();
     }
+
 }
