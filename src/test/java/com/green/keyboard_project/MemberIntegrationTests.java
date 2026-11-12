@@ -123,4 +123,22 @@ class MemberIntegrationTests {
             .content("{\"password\":\"Keyboard123\"}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.verified").value(true));
     }
+
+    @Test void passwordRecheckAndSoftDeleteRetainMemberRowAndInvokeRevocation() {
+        int id = createMember();
+        given(auth.isPasswordMember(id)).willReturn(true);
+        assertThat(service.verifyPassword(id,"Wrong123")).isFalse();
+        assertThat(service.verifyPassword(id,password)).isTrue();
+        service.withdraw(id,password);
+        jdbc.execute("SELECT 1");
+        User user = users.findById(id).orElseThrow();
+        assertThat(user.isDeleted()).isTrue();
+        assertThat(user.getDeletedAt()).isNotNull();
+        assertThat(user.getEmail()).hasSize(50).isNotEqualTo(email);
+        assertThat(user.getName()).isEqualTo("탈퇴 회원");
+        assertThat(user.getPhoneNumber()).isNull();
+        assertThat(new BCryptPasswordEncoder().matches(password,user.getPassword())).isFalse();
+        users.flush();
+        assertThat(jdbc.queryForObject("SELECT is_deleted FROM users WHERE user_id=?",Integer.class,id)).isEqualTo(1);
+    }
 }

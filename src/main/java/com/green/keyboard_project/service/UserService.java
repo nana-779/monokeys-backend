@@ -24,7 +24,7 @@ public class UserService {
         this.authentication = authentication;
     }
 
-
+    private static LocalDateTime now() { return LocalDateTime.now(ZoneId.of("Asia/Seoul")); }
 
     @Transactional(readOnly = true)
     public boolean verifyPassword(int userId, String password) {
@@ -33,7 +33,22 @@ public class UserService {
         return passwords.matches(password, user.getPassword());
     }
 
-
+    @Transactional
+    public void withdraw(int userId, String password) {
+        User user = users.findByIdForWithdrawal(userId).orElseThrow(UserService::inactive);
+        WithdrawalAuth auth = requirePasswordMember(user);
+        if (!passwords.matches(password, user.getPassword())) {
+            throw new AuthorizationFailureException("비밀번호가 일치하지 않습니다.");
+        }
+        // 32자리 무작위 식별자와 도메인을 합쳐 users.email의 50자 한도를 지킵니다.
+        user.setEmail("w-" + UUID.randomUUID().toString().replace("-", "") + "@account.invalid");
+        user.setPassword(passwords.encode(UUID.randomUUID().toString()));
+        user.setName("탈퇴 회원");
+        user.setPhoneNumber(null);
+        user.setDeleted(true);
+        user.setDeletedAt(now());
+        user.setUpdatedAt(user.getDeletedAt());
+    }
 
     private WithdrawalAuth requirePasswordMember(User user) {
         if (user.isDeleted()) { throw inactive(); }
