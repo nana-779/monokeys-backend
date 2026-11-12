@@ -4,6 +4,7 @@ import com.green.keyboard_project.dto.*;
 import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.exceptions.*;
 import com.green.keyboard_project.repository.UserRepository;
+import com.green.keyboard_project.service.UserService;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @Transactional
 class MemberIntegrationTests {
+    @Autowired UserService service;
     @Autowired UserRepository users;
     @Autowired JdbcTemplate jdbc;
     @Autowired WebApplicationContext context;
@@ -89,5 +91,10 @@ class MemberIntegrationTests {
             var nonBoolean = new TermsConsent(JsonMapper.builder().build().readTree("\"true\""), valid().termsConsent().privacyPolicy());
             assertThat(validator.validate(nonBoolean)).isNotEmpty();
         }
+    }
+
+    @Test void validatesSignupAndRejectsDuplicateEmail() throws Exception {
+        secured.perform(get("/api/auth/check-email").param("email", email))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(true));
     }
 }
