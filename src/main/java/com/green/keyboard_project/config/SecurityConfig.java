@@ -41,6 +41,7 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/logout", "/api/auth/refresh").permitAll()
+                        .requestMatchers("/api/users/signup", "/api/auth/check-email").permitAll()
                         .requestMatchers("/api/auth/me").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         // TODO: 보호 페이지 목록(회의 안건) 확정 후 장바구니·주문·마이페이지 API 추가
