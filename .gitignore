@@ -37,5 +37,5 @@ out/
 ### VS Code ###
 .vscode/
 
-# Personal DB credentials and JWT signing key
+### 비밀 설정 (DB 계정, JWT 비밀키) ###
 application-secret.properties
