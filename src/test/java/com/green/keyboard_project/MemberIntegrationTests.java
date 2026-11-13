@@ -13,7 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.security.web.csrf.DefaultCsrfToken;
 import org.springframework.security.web.csrf.CsrfToken;
@@ -37,11 +37,12 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-/** 실제 keyboard_shop에 연결하되 각 테스트의 데이터는 롤백합니다. */
+/** H2 격리 환경에서 회원 API를 검증합니다. 로그인 통합 기반이 필요합니다. */
 @SpringBootTest
 @Transactional
 class MemberIntegrationTests {
     @Autowired UserService service;
+    @Autowired PasswordEncoder passwords;
     @Autowired UserRepository users;
     @Autowired JdbcTemplate jdbc;
     @Autowired WebApplicationContext context;
@@ -61,7 +62,7 @@ class MemberIntegrationTests {
     int createMember() {
         var user = new User();
         user.setEmail(email);
-        user.setPassword(new BCryptPasswordEncoder().encode(password));
+        user.setPassword(passwords.encode(password));
         user.setName("테스트 회원");
         user.setPhoneNumber("01012345678");
         user.setRole(User.RoleType.USER);
@@ -70,11 +71,12 @@ class MemberIntegrationTests {
         return users.saveAndFlush(user).getUserId();
     }
 
-    @Test void connectsToExpectedDatabaseWithoutAutomaticDdl() {
-        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("keyboard_shop");
-        assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("none");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='keyboard_shop'", Integer.class)).isEqualTo(19);
+    @Test void connectsOnlyToIsolatedTestDatabase() {
+        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualToIgnoringCase("keyboard_test");
+        assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("create-drop");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='PUBLIC'", Integer.class)).isEqualTo(19);
     }
+
 
     @Test void preservesCredentialedCorsForMemberPathsOnly() throws Exception {
         secured.perform(options("/api/users/me").header("Origin","http://localhost:3000")
@@ -102,18 +104,18 @@ class MemberIntegrationTests {
         controllerOnly.perform(post("/api/users/me/verify-password").contentType("application/json").content("{"))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
     }
-    @Test void blocksAnonymousAndUnimplementedCookieAuthentication() throws Exception {
+    @Test void blocksAnonymousAndUnverifiedCookieAuthentication() throws Exception {
         for (var request : List.of(post("/api/users/me/verify-password"),delete("/api/users/me"))) {
             secured.perform(request.contentType("application/json").content("{\"password\":\"Keyboard123\"}"))
-                .andExpect(status().isForbidden()); // CSRF 보호에서 인증 전에 거부
+                .andExpect(status().isUnauthorized()); // 로그인 JWT 체인에서 미인증 요청 거부
         }
         secured.perform(delete("/api/users/me").cookie(new Cookie("accessToken","unverified"))
             .contentType("application/json").content("{\"password\":\"Keyboard123\"}"))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isUnauthorized());
         verifyNoInteractions(auth);
     }
 
-    @Test void validCsrfStillRequiresVerifiedIdentityAndRejectsCookieOrBearerFallback() throws Exception {
+    @Test void csrfHeaderDoesNotReplaceVerifiedIdentityOrEnableBearerFallback() throws Exception {
         var session = new MockHttpSession();
         var token = new DefaultCsrfToken("X-CSRF-TOKEN", "_csrf", "test-csrf");
         session.setAttribute("org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository.CSRF_TOKEN", token);
@@ -155,7 +157,7 @@ class MemberIntegrationTests {
         assertThat(user.getEmail()).hasSize(50).isNotEqualTo(email);
         assertThat(user.getName()).isEqualTo("탈퇴 회원");
         assertThat(user.getPhoneNumber()).isNull();
-        assertThat(new BCryptPasswordEncoder().matches(password,user.getPassword())).isFalse();
+        assertThat(passwords.matches(password,user.getPassword())).isFalse();
         users.flush();
         assertThat(jdbc.queryForObject("SELECT is_deleted FROM users WHERE user_id=?",Integer.class,id)).isEqualTo(1);
         verify(auth).revokeRefreshTokens(id);
@@ -164,7 +166,7 @@ class MemberIntegrationTests {
     @Test void authenticatedControllerUsesPrincipalRatherThanSubmittedUserId() throws Exception {
         int id = createMember();
         given(auth.isPasswordMember(id)).willReturn(true);
-        // 인증 필터 구현이 없으므로 컨트롤러 테스트에만 검증된 principal을 주입합니다.
+        // 컨트롤러 테스트에서는 필터를 제외하고 인증된 principal을 직접 주입합니다.
         SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
             new WithdrawalAuth.Principal(id),null,List.of()));
         var controllerOnly = MockMvcBuilders.webAppContextSetup(context).build();
