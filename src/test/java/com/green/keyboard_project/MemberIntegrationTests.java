@@ -12,7 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.security.web.csrf.DefaultCsrfToken;
 import org.springframework.security.web.csrf.CsrfToken;
@@ -36,11 +36,12 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-/** 실제 keyboard_shop에 연결하되 각 테스트의 데이터는 롤백합니다. */
+/** H2 격리 환경에서 회원 API를 검증합니다. 로그인 통합 기반이 필요합니다. */
 @SpringBootTest
 @Transactional
 class MemberIntegrationTests {
     @Autowired UserService service;
+    @Autowired PasswordEncoder passwords;
     @Autowired UserRepository users;
     @Autowired JdbcTemplate jdbc;
     @Autowired WebApplicationContext context;
@@ -72,11 +73,12 @@ class MemberIntegrationTests {
             """.formatted(email);
     }
 
-    @Test void connectsToExpectedDatabaseWithoutAutomaticDdl() {
-        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("keyboard_shop");
-        assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("none");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='keyboard_shop'", Integer.class)).isEqualTo(19);
+    @Test void connectsOnlyToIsolatedTestDatabase() {
+        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualToIgnoringCase("keyboard_test");
+        assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("create-drop");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='PUBLIC'", Integer.class)).isEqualTo(19);
     }
+
 
     @Test void preservesCredentialedCorsForMemberPathsOnly() throws Exception {
         secured.perform(options("/api/users/signup").header("Origin","http://localhost:3000")
@@ -93,12 +95,25 @@ class MemberIntegrationTests {
             .andExpect(status().isCreated()).andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.email").value(email)).andExpect(jsonPath("$.data.password").doesNotExist());
         String hash = jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email);
-        assertThat(new BCryptPasswordEncoder().matches(password, hash)).isTrue();
+        assertThat(passwords.matches(password, hash)).isTrue();
         var address = jdbc.queryForMap("SELECT a.* FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=?", email);
         assertThat(address.get("postal_code")).isEqualTo("04524");
         assertThat(address.get("address_alias")).isEqualTo("기본");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM address a JOIN users u ON a.user_id=u.user_id WHERE u.email=? AND a.is_default=1", Integer.class, email)).isEqualTo(1);
     }
+
+    @Test void emailAvailabilityChangesAfterSignupWithoutAuthentication() throws Exception {
+        secured.perform(get("/api/auth/check-email").param("email", email))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.available").value(true));
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json()))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.data.role").value("USER"))
+            .andExpect(jsonPath("$.data.deleted").value(false));
+        secured.perform(get("/api/auth/check-email").param("email", email))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(false));
+        assertThat(passwords.matches(password, jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email))).isTrue();
+    }
+
 
     @Test void validatesSignupAndRejectsDuplicateEmail() throws Exception {
         secured.perform(post("/api/users/signup").contentType("application/json").content(json().replace("Keyboard123", "short1")))

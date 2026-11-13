@@ -11,7 +11,6 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,10 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
     private final UserRepository users;
     private final AddressRepository addresses;
-    private final PasswordEncoder passwords = new BCryptPasswordEncoder();
+    private final PasswordEncoder passwords;
 
-    public UserService(UserRepository users, AddressRepository addresses) {
+    public UserService(UserRepository users, AddressRepository addresses, PasswordEncoder passwords) {
         this.users = users;
+        this.passwords = passwords;
         this.addresses = addresses;
     }
 
