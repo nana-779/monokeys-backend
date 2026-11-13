@@ -1,6 +1,7 @@
 package com.green.keyboard_project.service;
 
 import com.green.keyboard_project.dto.CreateProductRequest;
+import com.green.keyboard_project.dto.ProductResponse;
 import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.ProductSpec;
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -23,12 +25,12 @@ public class ProductService {
     private final ProductSpecRepository productSpecRepository;
 
     @Transactional
-    public int createProduct(CreateProductRequest request) {
+    public ProductResponse createProduct(CreateProductRequest request, String imageUrl) {
         Optional<Category> categoryOptional =
                 categoryRepository.findByNameAndParentIsNull(request.getCategoryName().trim());
 
         if (categoryOptional.isEmpty()) {
-            throw new ResourceNotFountException("최상위 카테고리를 찾을 수 없습니다.");
+            throw new ResourceNotFountException("카테고리를 찾을 수 없습니다.");
         }
 
         Category category = categoryOptional.get();
@@ -39,7 +41,7 @@ public class ProductService {
         product.setName(request.getName());
         product.setBasePrice(request.getBasePrice());
         product.setStockQuantity(request.getStockQuantity());
-        product.setThumbnailUrl(request.getThumbnailUrl());
+        product.setThumbnailUrl(imageUrl);
         product.setDescription(request.getDescription());
         product.setActive(true);
         product.setVersion(0);
@@ -60,6 +62,67 @@ public class ProductService {
 
         productSpecRepository.save(productSpec);
 
-        return savedProduct.getProductId();
+        return ProductResponse.from(savedProduct, productSpec);
+    }
+
+    @Transactional
+    public ProductResponse updateProduct(int productId, CreateProductRequest request, String newImageUrl) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."));
+        Category category = categoryRepository.findByNameAndParentIsNull(request.getCategoryName().trim())
+                .orElseThrow(() -> new ResourceNotFountException("카테고리를 찾을 수 없습니다."));
+        product.setCategory(category);
+        product.setName(request.getName());
+        product.setBasePrice(request.getBasePrice());
+        product.setStockQuantity(request.getStockQuantity());
+        product.setDescription(request.getDescription());
+        if (newImageUrl != null) product.setThumbnailUrl(newImageUrl);
+        product.setUpdatedAt(LocalDateTime.now());
+        ProductSpec spec = productSpecRepository.findById(productId).orElseGet(() -> {
+            ProductSpec created = new ProductSpec();
+            created.setProduct(product);
+            return created;
+        });
+        spec.setLayout(request.getLayout());
+        spec.setHousingMaterial(request.getHousingMaterial());
+        spec.setSupportPins(request.getSupportPins());
+        spec.setIsWireless(request.getIsWireless());
+        spec.setSwitchPin(request.getSwitchPin());
+        spec.setSwitchType(request.getSwitchType());
+        spec.setKeycapMaterial(request.getKeycapMaterial());
+        productSpecRepository.save(spec);
+        Product saved = productRepository.save(product);
+        return ProductResponse.from(saved, spec);
+    }
+
+    @Transactional(readOnly = true)
+    public String getThumbnailUrl(int productId) {
+        return productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."))
+                .getThumbnailUrl();
+    }
+
+    @Transactional
+    public String deleteProduct(int productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."));
+        String oldImageUrl = product.getThumbnailUrl();
+        productRepository.delete(product);
+        return oldImageUrl;
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getActiveProducts() {
+        return productRepository.findAll().stream().filter(Product::isActive)
+                .map(product -> ProductResponse.from(product, productSpecRepository.findById(product.getProductId()).orElse(null)))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ProductResponse getActiveProduct(int productId) {
+        Product product = productRepository.findById(productId)
+                .filter(Product::isActive)
+                .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."));
+        return ProductResponse.from(product, productSpecRepository.findById(productId).orElse(null));
     }
 }
