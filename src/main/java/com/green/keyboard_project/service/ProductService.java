@@ -3,8 +3,10 @@ package com.green.keyboard_project.service;
 import com.green.keyboard_project.dto.product.ProductListResponseDto;
 import com.green.keyboard_project.dto.product.ProductResponseDto;
 import com.green.keyboard_project.entity.Product;
+import com.green.keyboard_project.entity.ProductImage;
 import com.green.keyboard_project.entity.ProductSpec;
 import com.green.keyboard_project.exceptions.ResourceNotFountException;
+import com.green.keyboard_project.repository.ProductImageRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.ProductSpecRepository;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +18,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,8 +30,13 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductSpecRepository productSpecRepository;
+    private final ProductImageRepository productImageRepository;
 
     public ProductListResponseDto getProducts(String category, String subcategory, int page, int size) {
+        // category 호환 처리 (keyboards -> pcb)
+        if ("keyboards".equalsIgnoreCase(category)) {
+            category = "pcb";
+        }
         // subcategory 호환 처리 (housing-abs -> housing-plastic)
         if ("housing-abs".equalsIgnoreCase(subcategory)) {
             subcategory = "housing-plastic";
@@ -40,8 +49,16 @@ public class ProductService {
                 pageable
         );
 
-        List<ProductResponseDto> content = productPage.getContent().stream()
-                .map(this::toDto)
+        List<Product> products = productPage.getContent();
+        List<Integer> productIds = products.stream().map(Product::getProductId).collect(Collectors.toList());
+        Map<Integer, List<ProductImage>> imagesByProductId = productIds.isEmpty()
+                ? Collections.emptyMap()
+                : productImageRepository.findByProduct_ProductIdInOrderByDisplayOrderAsc(productIds)
+                        .stream()
+                        .collect(Collectors.groupingBy(img -> img.getProduct().getProductId()));
+
+        List<ProductResponseDto> content = products.stream()
+                .map(p -> toDto(p, imagesByProductId.getOrDefault(p.getProductId(), Collections.emptyList())))
                 .collect(Collectors.toList());
 
         return ProductListResponseDto.builder()
@@ -56,10 +73,11 @@ public class ProductService {
     public ProductResponseDto getProductById(int productId) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다. (ID: " + productId + ")"));
-        return toDto(product);
+        List<ProductImage> galleryEntities = productImageRepository.findByProduct_ProductIdOrderByDisplayOrderAsc(productId);
+        return toDto(product, galleryEntities);
     }
 
-    private ProductResponseDto toDto(Product p) {
+    private ProductResponseDto toDto(Product p, List<ProductImage> galleryEntities) {
         ProductSpec spec = productSpecRepository.findById(p.getProductId()).orElse(null);
 
         String parentId = "";
@@ -71,7 +89,7 @@ public class ProductService {
             }
         }
 
-        String normCategory = "keyboards";
+        String normCategory = "pcb";
         if (parentId.contains("hous")) normCategory = "housing";
         else if (parentId.contains("switch")) normCategory = "switches";
         else if (parentId.contains("keycap")) normCategory = "keycaps";
@@ -80,13 +98,26 @@ public class ProductService {
         String thumb = p.getThumbnailUrl() != null ? p.getThumbnailUrl() : "";
 
         List<ProductResponseDto.MediaDto> images = new ArrayList<>();
-        images.add(ProductResponseDto.MediaDto.builder()
-                .id(p.getProductId() + "-0")
-                .url(thumb)
-                .alt(p.getName())
-                .build());
+        List<String> gallery = new ArrayList<>();
 
-        List<String> gallery = List.of(thumb);
+        if (galleryEntities != null && !galleryEntities.isEmpty()) {
+            for (int i = 0; i < galleryEntities.size(); i++) {
+                String url = galleryEntities.get(i).getImageUrl();
+                images.add(ProductResponseDto.MediaDto.builder()
+                        .id(p.getProductId() + "-" + i)
+                        .url(url)
+                        .alt(p.getName() + " 이미지 " + (i + 1))
+                        .build());
+                gallery.add(url);
+            }
+        } else if (!thumb.isBlank()) {
+            images.add(ProductResponseDto.MediaDto.builder()
+                    .id(p.getProductId() + "-0")
+                    .url(thumb)
+                    .alt(p.getName())
+                    .build());
+            gallery.add(thumb);
+        }
 
         String layout = null;
         String material = null;
