@@ -22,7 +22,7 @@ import com.green.keyboard_project.service.ProductImageStorageService;
 import com.green.keyboard_project.dto.ProductResponse;
 
 @RestController
-@RequestMapping("/admin/products")
+@RequestMapping("/api/admin/products")
 @CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"})
 @AllArgsConstructor
 public class AdminProductController {
