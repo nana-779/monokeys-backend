@@ -38,7 +38,7 @@ public class AdminProductController {
         String imageUrl = image != null && !image.isEmpty() ? imageStorageService.store(image) : null;
         try {
             ProductResponse created = productService.createProduct(request, imageUrl);
-            URI location = URI.create("/admin/products/" + created.productId());
+            URI location = URI.create("/api/admin/products/" + created.productId());
 
             return ResponseEntity.created(location).body(ApiResponse.ok(created));
         } catch (RuntimeException e) {
