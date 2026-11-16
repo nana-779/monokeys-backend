@@ -26,14 +26,7 @@ public class ProductService {
 
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request, String imageUrl) {
-        Optional<Category> categoryOptional =
-                categoryRepository.findByNameAndParentIsNull(request.getCategoryName().trim());
-
-        if (categoryOptional.isEmpty()) {
-            throw new ResourceNotFountException("카테고리를 찾을 수 없습니다.");
-        }
-
-        Category category = categoryOptional.get();
+        Category category = findRootCategory(request.getCategoryName());
         LocalDateTime now = LocalDateTime.now();
 
         Product product = new Product();
@@ -69,8 +62,7 @@ public class ProductService {
     public ProductResponse updateProduct(int productId, CreateProductRequest request, String newImageUrl) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."));
-        Category category = categoryRepository.findByNameAndParentIsNull(request.getCategoryName().trim())
-                .orElseThrow(() -> new ResourceNotFountException("카테고리를 찾을 수 없습니다."));
+        Category category = findRootCategory(request.getCategoryName());
         product.setCategory(category);
         product.setName(request.getName());
         product.setBasePrice(request.getBasePrice());
@@ -103,12 +95,11 @@ public class ProductService {
     }
 
     @Transactional
-    public String deleteProduct(int productId) {
+    public void deleteProduct(int productId) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."));
-        String oldImageUrl = product.getThumbnailUrl();
-        productRepository.delete(product);
-        return oldImageUrl;
+        product.setActive(false);
+        product.setUpdatedAt(LocalDateTime.now());
     }
 
     @Transactional(readOnly = true)
@@ -124,5 +115,19 @@ public class ProductService {
                 .filter(Product::isActive)
                 .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다."));
         return ProductResponse.from(product, productSpecRepository.findById(productId).orElse(null));
+    }
+
+    private Category findRootCategory(String categoryName) {
+        String categoryId = switch (categoryName.trim()) {
+            case "하우징" -> "housing";
+            case "기판", "기판 (PCB)" -> "pcb";
+            case "스위치" -> "switches";
+            case "키캡" -> "keycaps";
+            default -> throw new ResourceNotFountException("카테고리를 찾을 수 없습니다.");
+        };
+
+        return categoryRepository.findById(categoryId)
+                .filter(category -> category.getParent() == null)
+                .orElseThrow(() -> new ResourceNotFountException("카테고리를 찾을 수 없습니다."));
     }
 }

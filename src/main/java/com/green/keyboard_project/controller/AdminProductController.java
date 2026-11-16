@@ -69,8 +69,7 @@ public class AdminProductController {
 
     @DeleteMapping("/{productId}")
     public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable int productId) {
-        String oldImageUrl = productService.deleteProduct(productId);
-        imageStorageService.deleteByUrl(oldImageUrl);
+        productService.deleteProduct(productId);
         return ResponseEntity.ok(ApiResponse.ok());
     }
 }

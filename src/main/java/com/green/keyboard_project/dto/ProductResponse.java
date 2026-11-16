@@ -6,6 +6,7 @@ import com.green.keyboard_project.entity.ProductSpec;
 public record ProductResponse(
         int productId,
         String categoryName,
+        String categoryId,
         String name,
         int basePrice,
         int stockQuantity,
@@ -24,6 +25,7 @@ public record ProductResponse(
         return new ProductResponse(
                 product.getProductId(),
                 product.getCategory().getName(),
+                product.getCategory().getCategoryId(),
                 product.getName(),
                 product.getBasePrice(),
                 product.getStockQuantity(),
