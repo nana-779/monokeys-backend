@@ -37,6 +37,7 @@ public class DevTossOrderSecurity {
     }
     // 이 브랜치에는 회원 공통 체인이 없으므로 초기 프로젝트의 기본 보호를 유지합니다.
     @Bean @Order(org.springframework.core.Ordered.LOWEST_PRECEDENCE)
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(name="securityFilterChain")
     SecurityFilterChain devOrdersDefaultProtection(HttpSecurity http) throws Exception {
         return http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
             .formLogin(org.springframework.security.config.Customizer.withDefaults())
