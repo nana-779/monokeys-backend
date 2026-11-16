@@ -3,6 +3,8 @@ package com.green.keyboard_project.dto;
 import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.ProductSpec;
 
+import java.time.LocalDateTime;
+
 public record ProductResponse(
         int productId,
         String categoryName,
@@ -13,6 +15,7 @@ public record ProductResponse(
         String thumbnailUrl,
         String description,
         boolean active,
+        LocalDateTime createdAt,
         String layout,
         String housingMaterial,
         String supportPins,
@@ -32,6 +35,7 @@ public record ProductResponse(
                 product.getThumbnailUrl(),
                 product.getDescription(),
                 product.isActive(),
+                product.getCreatedAt(),
                 spec == null ? null : spec.getLayout(),
                 spec == null ? null : spec.getHousingMaterial(),
                 spec == null ? null : spec.getSupportPins(),

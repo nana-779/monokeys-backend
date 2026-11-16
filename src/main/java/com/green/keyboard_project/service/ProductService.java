@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
 import java.util.List;
 
 @Service
@@ -58,40 +57,21 @@ public class ProductService {
         return ProductResponse.from(savedProduct, productSpec);
     }
 
-    @Transactional
-    public ProductResponse updateProduct(int productId, CreateProductRequest request, String newImageUrl) {
-        Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
-        Category category = findRootCategory(request.getCategoryName());
-        product.setCategory(category);
-        product.setName(request.getName());
-        product.setBasePrice(request.getBasePrice());
-        product.setStockQuantity(request.getStockQuantity());
-        product.setDescription(request.getDescription());
-        if (newImageUrl != null) product.setThumbnailUrl(newImageUrl);
-        product.setUpdatedAt(LocalDateTime.now());
-        ProductSpec spec = productSpecRepository.findById(productId).orElseGet(() -> {
-            ProductSpec created = new ProductSpec();
-            created.setProduct(product);
-            return created;
-        });
-        spec.setLayout(request.getLayout());
-        spec.setHousingMaterial(request.getHousingMaterial());
-        spec.setSupportPins(request.getSupportPins());
-        spec.setIsWireless(request.getIsWireless());
-        spec.setSwitchPin(request.getSwitchPin());
-        spec.setSwitchType(request.getSwitchType());
-        spec.setKeycapMaterial(request.getKeycapMaterial());
-        productSpecRepository.save(spec);
-        Product saved = productRepository.save(product);
-        return ProductResponse.from(saved, spec);
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getAllProducts() {
+        return productRepository.findAll().stream()
+                .map(product -> ProductResponse.from(
+                        product,
+                        productSpecRepository.findById(product.getProductId()).orElse(null)))
+                .toList();
     }
 
     @Transactional(readOnly = true)
-    public String getThumbnailUrl(int productId) {
-        return productRepository.findById(productId)
-                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."))
-                .getThumbnailUrl();
+    public ProductResponse getProduct(int productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
+        ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
+        return ProductResponse.from(product, spec);
     }
 
     @Transactional
@@ -130,4 +110,5 @@ public class ProductService {
                 .filter(category -> category.getParent() == null)
                 .orElseThrow(() -> new ResourceNotFoundException("카테고리를 찾을 수 없습니다."));
     }
+
 }
