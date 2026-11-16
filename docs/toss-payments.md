@@ -26,3 +26,20 @@ DB는 localhost:3306/keyboard_shop을 사용합니다. 기존 스키마가 필�
 키 부재/잘못된 종류/운영 키 거부/비활성화/안전한 표시를 외부 API 호출 없이 검사합니다. 환경변수 로드 성공은 실제 토스 API 인증·결제 성공을 뜻하지 않습니다.
 
 공식 문서: https://docs.tosspayments.com/sdk/v2/js/payment-widget
+
+## 3단계: 개발 전용 테스트 주문
+
+백엔드 실행 환경에 TOSS_PAYMENTS_DEV_ORDERS_ENABLED=true를 추가하고 SPRING_PROFILES_ACTIVE에 local을 포함하세요. 기존 프로필이 있다면 지우지 말고 쉼표로 추가하되 prod 또는 production이 활성화된 환경에서는 이 API를 사용할 수 없습니다. 운영 프로필을 지우거나 운영에서 local을 켜서 테스트하지 마세요. 기본값은 비활성화이며 local과 명시적 true를 모두 요구합니다. 설정 변경 후 해당 서버만 재시작합니다.
+
+- POST /api/dev/toss-orders: 본문/쿼리 없이 요청. 201 ApiResponse로 서버가 생성한 orderId, orderName, amount=10000, currency=KRW, status=PENDING 반환. 입력이 있으면 400.
+- GET /api/dev/toss-orders/{orderId}: 저장 주문 조회 200. 잘못된 형식400, 없음/만료404.
+- 메모리 저장: ConcurrentHashMap, UUID 및 putIfAbsent, 동기화된 생성으로 중복/한도 보호. 최대1000건,30분 만료. 한도429, 반복 충돌503. 서버 재시작 시 소멸하며 DB Entity·Repository를 사용하지 않습니다.
+- 루프백 주소에서만 생성·조회 허용. CORS는 http://localhost:3000만 허용. 해당 생성 POST만 CSRF 검사에서 제외합니다. 기존 다른 경로의 CSRF와 기본 인증 보호는 유지합니다.
+
+이 원격 브랜치는 초기 세팅 기반으로 회원 보안 코드가 없습니다. 회원 기능을 가져오는 대신 개발 주문 활성화 시 최후순위 기본 보호 체인(formLogin/httpBasic)을 포함해 사용자 정의 체인 추가로 다른 경로가 공개되는 것을 방지했습니다. 비활성화 시 기존 Spring Boot 기본 보안이 동작합니다. 향후 팀 공통 인증 설정과 통합할 때 체인 순서·CORS·CSRF를 함께 검토해야 하며 쿠키 인증 구현을 추가한 것은 아닙니다.
+
+프론트에서도 개인 .env.local에 TOSS_PAYMENTS_DEV_ORDERS_ENABLED=true를 설정하고 재시작한 뒤 http://localhost:3000/dev/toss-order에서 확인합니다. 서버 금액 조회 및 SDK 금액 설정 완료까지만 수행합니다.
+
+검증: ./gradlew test --tests '*DevTossOrder*', ./gradlew clean build. 앞 절의 개인 키 없는 테스트 환경을 사용합니다. 테스트는 메모리 저장·동시300건·충돌·만료·한도·입력/조회 오류·루프백/CORS·프로필 차단·기존 기본 보호를 확인합니다.
+
+백엔드 2단계 변경은 없습니다. SDK 설치·초기화는 프론트에서만 수행하므로 빈 커밋이나 불필요한 서버 코드를 만들지 않았습니다. 실제 주문 API는 별도 팀 작업이며 수정/대체하지 않았습니다. 결제수단/약관 UI·requestPayment·승인·취소·웹훅·결제 DB 저장은 아직 구현하지 않았습니다. 테스트 주문과 금액 준비 성공은 실제 API 인증·결제 성공이 아닙니다.
