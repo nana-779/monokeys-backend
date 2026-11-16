@@ -23,6 +23,7 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
     private final ProductSpecRepository productSpecRepository;
 
+    // 관리자 상품 등록
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request, String imageUrl) {
         Category category = findRootCategory(request.getCategoryName());
@@ -57,6 +58,7 @@ public class ProductService {
         return ProductResponse.from(savedProduct, productSpec);
     }
 
+    // 관리자 전체 상품 조회
     @Transactional(readOnly = true)
     public List<ProductResponse> getAllProducts() {
         return productRepository.findAll().stream()
@@ -66,10 +68,11 @@ public class ProductService {
                 .toList();
     }
 
+    // 관리자 상세 상품 조회
     @Transactional(readOnly = true)
     public ProductResponse getProduct(int productId) {
         Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
         ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
         return ProductResponse.from(product, spec);
     }
@@ -77,7 +80,7 @@ public class ProductService {
     @Transactional
     public void deleteProduct(int productId) {
         Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
         product.setActive(false);
         product.setUpdatedAt(LocalDateTime.now());
     }

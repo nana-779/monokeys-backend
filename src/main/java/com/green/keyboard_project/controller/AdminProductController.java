@@ -32,11 +32,13 @@ public class AdminProductController {
     private final ProductService productService;
     private final ProductImageStorageService imageStorageService;
 
+    // 관리자 전체 상품 조회
     @GetMapping
     public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProduct() {
         return ResponseEntity.ok(ApiResponse.ok(productService.getAllProducts()));
     }
 
+    // 관리자 상세 상품 조회
     @GetMapping("/{productId}")
     public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable int productId) {
         return ResponseEntity.ok(ApiResponse.ok(productService.getProduct(productId)));
