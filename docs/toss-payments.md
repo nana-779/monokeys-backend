@@ -89,3 +89,77 @@ requestPayment에는 SDK가 지원하는 orderId/orderName/successUrl/failUrl을
 7번 이후: 실제 승인 URL·요청/응답 계약, 서버 측 멱등성, 승인 결과 재조회·저장·응답 검증, 실제 승인 성공/실패 테스트가 필요합니다. 프론트 잠금만으로 새로고침·다른 탭·다른 장치의 중복 승인을 막을 수는 없습니다. 실제 주문 API/표시는 후속 범위입니다.
 
 이번 단계는 실제 인증·승인 요청, DB 변경, 회원/쇼핑몰 변경, Git commit/push/merge/PR 및 실행 중 서버 전환을 하지 않습니다. 6-1~6-18 원문은 현재 대화·첨부·프로젝트 문서에서 확인되지 않아, 사용자 메시지의14개 요구 항목을 기준으로 구현했습니다. 원문 번호별 완료 판정은 보류합니다.
+
+## 7단계: 개발 주문 결제 승인 API
+
+`POST /api/payments/confirm`은 기존 개발 주문만 사용합니다. 프론트 6단계는 아직 연결하지 않았습니다.
+회원·상품 서비스, JWT 쿠키 정책, 공통 SecurityConfig, 실제 주문 DB 및 Payment 엔티티는 변경하지 않습니다.
+
+### 활성화와 접근
+
+- `local` 활성화, `prod`와 `production` 비활성화
+- `TOSS_PAYMENTS_DEV_ORDERS_ENABLED=true`
+- `TOSS_PAYMENTS_TEST_ENABLED=true`
+- `TOSS_PAYMENTS_DEV_CONFIRM_ENABLED=true` (기본 false)
+- 기존 `TOSS_PAYMENTS_SECRET_KEY`의 주문서형 테스트 시크릿 키 사용
+- 직접 연결한 루프백 주소와 기존 `cors.allowed-origin`과 일치하는 Origin 필요
+- POST application/json만 허용. 브라우저가 아닌 호출도 동일 Origin 헤더를 명시해야 함
+- X-Forwarded-For로 루프백을 우회할 수 없음. 역방향 프록시/운영 서버용 구성이 아님
+- 전용 보안 체인은 비활성 환경에서도 경로를 차단하며 공통 로그인·회원 정책을 변경하지 않음
+
+실제 키나 비밀값을 문서·테스트·로그에 기록하지 않습니다. 개인 환경파일은 수정하지 않습니다.
+
+### 요청과 응답
+
+요청 JSON: `paymentKey`(공백 없는 불투명 문자열, 최대200자), `orderId`(기존 dev_ 주문번호),
+`amount`(양의 JSON 정수). 숫자 문자열·소수·범위 초과 값은 거부합니다.
+신규 승인 전에 서버 개발 주문의 존재·만료·금액·통화·PENDING 상태를 확인합니다.
+잘못된 주문·금액은 토스 HTTP 호출 전에 거부합니다. 기존 주문 API와 일치하게 없음/만료는404입니다.
+
+응답은 기존 `{success,message,data}` 구조입니다. data는 orderId, amount, currency,
+paymentStatus, completed, method, approvedAt, storage를 포함합니다. paymentKey나 원본 Payment는 반환하지 않습니다.
+`storage=MEMORY_ONLY`이며 실제 DB 저장 성공을 의미하지 않습니다.
+
+- 200 / DONE / completed=true: 승인 응답 검증 완료
+- 200 / WAITING_FOR_DEPOSIT / completed=false: 가상계좌 입금 대기, 결제 완료 아님
+- 202 / CONFIRMING 또는 UNKNOWN / completed=false: 처리 중 또는 결과 미확정
+- 202에는 Retry-After:3이 있으나 클라이언트가 무한 자동 재요청해서는 안 됨
+- 400: 요청 오류, 403: 개발 접근 조건 위반, 404: 주문 없음/만료
+- 409: 금액/요청/결제상태 충돌, 422: 제공자의 확정 거절, 429: 메모리 한도
+- 502: 제공자 인증/키 설정 오류
+- 오류 data.code는 내부 코드이며 data.providerCode에는 허용 목록의 공식 코드만 포함
+
+모든 승인 응답은 Cache-Control:no-store입니다. JSON 이외의 요청은 보안 단계에서403입니다.
+`success=true`만 보고 결제 완료로 표시하지 말고 completed와 paymentStatus를 함께 확인해야 합니다.
+
+### 외부 호출과 안전한 재조회
+
+- POST https://api.tosspayments.com/v1/payments/confirm
+- Basic 인증은 시크릿 뒤 콜론을 붙여 인코딩하며 로그에 출력하지 않음
+- 외부 요청 금액은 서버 주문과 비교한 값만 사용
+- 호스트 고정, 리다이렉트 미허용, 연결5초·응답65초(설정 범위60~120초)
+- 주문별 고정 Idempotency-Key를 사용. 오류가 났다는 이유로 새 키를 만들지 않음
+- 타임아웃, 5XX, 408/409/429, 이미 처리된 결제, 비정상 응답은 UNKNOWN
+- 같은 UNKNOWN 요청은 GET /v1/payments/{paymentKey}로만 재조회하며 승인 POST를 반복하지 않음
+- 조회404/실패/미승인 상태는 실패 확정으로 보지 않고 UNKNOWN 유지. 자동 재승인 없음
+- 주문번호 조회 API는 현재 test_gsk 키의 지원 범위가 아니므로 사용하지 않음
+- 응답의 결제키·주문번호·금액·KRW·상태와 완료 시 승인일시·수단을 검증
+
+### 메모리 한계와 후속 작업
+
+주문당 하나의 요청을 원자적으로 확보하며 같은 주문의 다른 키·금액, 다른 주문의 동일 키 재사용을409로 거부합니다.
+동일 완료 요청은 캐시 결과를 반환합니다. 외부 호출 중에는 전체 저장소 잠금을 잡지 않습니다.
+승인 기록은 최대1000건이며 미확정/완료 기록을 자동 삭제하지 않습니다. 한도 도달 시 신규 승인은429입니다.
+기존 개발 주문이 만료돼도 이미 시작한 승인은 고정된 주문정보로 재조회할 수 있습니다.
+재시작 시 주문/승인 메모리는 사라집니다. 재시작 후 원본 주문이 없으면 외부 승인을 새로 보내지 않습니다.
+다중 서버·재시작 복구·영속 멱등성은 지원하지 않으며 운영 결제에 사용할 수 없습니다.
+
+7-16의 전달 자료는 검증된 응답 DTO로 준비했습니다. 8단계 DB 저장 연결과 실제 주문 소유자 검증은 후속입니다.
+7-23의 실제 샌드박스 승인은 별도 구매자 인증 후 확인해야 합니다. 자동화 테스트는 가짜 HTTP 응답만 사용합니다.
+프론트 연결 시 기존15초 조회 제한을 승인 POST에 재사용하지 말고 서버 승인 대기보다 긴 제한을 사용하세요.
+화면 취소/언마운트/네트워크 실패를 결제 실패로 단정하지 말고 같은 요청을 통해 조회해야 합니다.
+
+공식 근거:
+- https://docs.tosspayments.com/reference
+- https://docs.tosspayments.com/reference/using-api/authorization
+- https://docs.tosspayments.com/reference/using-api/api-keys

@@ -115,6 +115,14 @@ class TossPaymentsClientTests {
         assertThatCode(() -> new TossPaymentsClient(credentials, 65)).doesNotThrowAnyException();
     }
 
+    @Test void socketTimeoutIsUncertainWithoutLeakingDiagnosticsOrRetrying() {
+        server.expect(anything()).andRespond(request -> {throw new java.net.SocketTimeoutException("private timeout diagnostic");});
+        var result=client.confirm(request,10000,"fixture");
+        assertThat(result.failure().uncertain()).isTrue();
+        assertThat(result.failure().toString()).doesNotContain("private timeout diagnostic");
+        server.verify();
+    }
+
     private String payment() {
         return "{\"paymentKey\":\""+KEY+"\",\"orderId\":\""+ORDER+"\",\"totalAmount\":10000,"
                 + "\"currency\":\"KRW\",\"status\":\"DONE\",\"method\":\"카드\",\"approvedAt\":\"2026-11-16T10:00:00+09:00\"}";

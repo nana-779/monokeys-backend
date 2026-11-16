@@ -209,6 +209,41 @@ class DevPaymentConfirmationServiceTests {
         verify(source, times(1)).find(request.orderId());
     }
 
+    @Test void contradictoryWaitingResponseIsUnknownAndRecoveredByGetOnly() {
+        var p=done();
+        when(client.confirm(any(), anyLong(), anyString())).thenReturn(TossPaymentsClient.Reply.payment(
+                new TossPaymentResponse(p.paymentKey(),p.orderId(),p.totalAmount(),"KRW","WAITING_FOR_DEPOSIT","가상계좌",p.approvedAt())));
+        when(client.find(anyString())).thenReturn(TossPaymentsClient.Reply.payment(done()));
+        assertThat(service.confirm(request).paymentStatus()).isEqualTo("UNKNOWN");
+        assertThat(service.confirm(request).completed()).isTrue();
+        verify(client,times(1)).confirm(any(),anyLong(),anyString());
+        verify(client,times(1)).find(request.paymentKey());
+    }
+
+    @Test void recoveryRuntimeFailureRemainsUnknownAndDoesNotStickBusy() {
+        when(client.confirm(any(),anyLong(),anyString())).thenReturn(TossPaymentsClient.Reply.failure(0,"TRANSPORT_ERROR",true));
+        when(client.find(anyString())).thenThrow(new IllegalStateException("private lookup detail"))
+                .thenReturn(TossPaymentsClient.Reply.payment(done()));
+        assertThat(service.confirm(request).paymentStatus()).isEqualTo("UNKNOWN");
+        assertThat(service.confirm(request).paymentStatus()).isEqualTo("UNKNOWN");
+        assertThat(service.confirm(request).completed()).isTrue();
+        verify(client,times(1)).confirm(any(),anyLong(),anyString());
+        verify(client,times(2)).find(request.paymentKey());
+    }
+
+    @ParameterizedTest @ValueSource(ints={401,403,408,429,503})
+    void recoveryErrorsNeverBecomeDefiniteFailureOrAnotherPost(int status) {
+        when(client.confirm(any(),anyLong(),anyString())).thenReturn(TossPaymentsClient.Reply.failure(0,"TRANSPORT_ERROR",true));
+        when(client.find(anyString())).thenReturn(TossPaymentsClient.Reply.failure(status,"PROVIDER_ERROR",status>=500));
+        for(int i=0;i<3;i++) {
+            var result=service.confirm(request);
+            assertThat(result.paymentStatus()).isEqualTo("UNKNOWN");
+            assertThat(result.completed()).isFalse();
+        }
+        verify(client,times(1)).confirm(any(),anyLong(),anyString());
+        verify(client,times(2)).find(request.paymentKey());
+    }
+
     private TossPaymentResponse done() {
         return new TossPaymentResponse(request.paymentKey(), request.orderId(), 10000, "KRW", "DONE", "카드",
                 OffsetDateTime.parse("2026-11-16T10:00:00+09:00"));

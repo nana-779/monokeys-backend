@@ -12,6 +12,10 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.security.web.FilterChainProxy;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
+import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -113,6 +117,17 @@ class DevPaymentConfirmationApiTests {
                 .andExpect(jsonPath("$.data.providerCode").value("INVALID_API_KEY"));
         mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
         mvc.perform(post("/admin/products").contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden()); // CSRF rejection must remain enabled in the fallback chain.
+        mvc.perform(post("/admin/products").contentType("application/json").content("{}")
+                .with(request -> {
+                    var repository = new HttpSessionCsrfTokenRepository();
+                    var token = repository.generateToken(request);
+                    repository.saveToken(token, request, new MockHttpServletResponse());
+                    new XorCsrfTokenRequestAttributeHandler().handle(request, new MockHttpServletResponse(), () -> token);
+                    var submitted = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+                    request.addHeader(submitted.getHeaderName(), submitted.getToken());
+                    return request;
+                }))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -136,6 +151,12 @@ class DevPaymentConfirmationApiTests {
                 .header("Access-Control-Request-Method", "POST").header("Access-Control-Request-Headers", "content-type"))
                 .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Credentials", "true"))
                 .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"));
+        mvc.perform(options("/api/payments/confirm").header("Origin", "https://untrusted.example")
+                .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isForbidden());
+        mvc.perform(options("/api/payments/confirm").header("Origin", "http://localhost:3000")
+                .header("Access-Control-Request-Method", "DELETE"))
+                .andExpect(status().isForbidden());
         verifyNoInteractions(client);
     }
 
@@ -148,6 +169,27 @@ class DevPaymentConfirmationApiTests {
         assertThat(output.getAll()).doesNotContain(marker);
         assertThat(new PaymentConfirmationRequest(marker, order, 1L).toString()).doesNotContain(marker);
         verifyNoInteractions(client);
+    }
+
+    @Test void waitingForDepositIsNotCompletedAndRepeatedRequestNeverReapproves() throws Exception {
+        when(client.confirm(any(),anyLong(),anyString())).thenReturn(TossPaymentsClient.Reply.payment(
+                new TossPaymentResponse(key,order,10000,"KRW","WAITING_FOR_DEPOSIT","가상계좌",null)));
+        for(int i=0;i<2;i++) {
+            mvc.perform(post("/api/payments/confirm").header("Origin","http://localhost:3000")
+                    .contentType("application/json").content(body("10000")))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.paymentStatus").value("WAITING_FOR_DEPOSIT"))
+                    .andExpect(jsonPath("$.data.completed").value(false)).andExpect(jsonPath("$.data.storage").value("MEMORY_ONLY"));
+        }
+        verify(client,times(1)).confirm(any(),anyLong(),anyString()); verify(client,never()).find(anyString());
+    }
+
+    @Test void contradictoryWaitingResultUsesExistingUnknownContract() throws Exception {
+        when(client.confirm(any(),anyLong(),anyString())).thenReturn(TossPaymentsClient.Reply.payment(
+                new TossPaymentResponse(key,order,10000,"KRW","WAITING_FOR_DEPOSIT","가상계좌",OffsetDateTime.now())));
+        mvc.perform(post("/api/payments/confirm").header("Origin","http://localhost:3000")
+                .contentType("application/json").content(body("10000")))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.data.paymentStatus").value("UNKNOWN"))
+                .andExpect(jsonPath("$.data.completed").value(false)).andExpect(header().string("Retry-After","3"));
     }
 
     private String body(String amount) {

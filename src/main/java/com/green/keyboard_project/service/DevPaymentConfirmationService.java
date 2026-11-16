@@ -54,7 +54,7 @@ public final class DevPaymentConfirmationService {
             boolean completed = "DONE".equals(payment.status());
             if (payment.method() == null || !METHODS.contains(payment.method())
                     || (completed && payment.approvedAt() == null)
-                    || (!completed && !"가상계좌".equals(payment.method()))) return unknown(lease, request);
+                    || (!completed && (!"가상계좌".equals(payment.method()) || payment.approvedAt() != null))) return unknown(lease, request);
             var response = new PaymentConfirmationResponse(request.orderId(), lease.serverAmount(), "KRW",
                     payment.status(), completed, payment.method(), payment.approvedAt(), "MEMORY_ONLY");
             store.complete(lease, response);
