@@ -22,7 +22,7 @@ class MemberServiceTests {
         user.setEmail("member@example.com");
         user.setPassword(new BCryptPasswordEncoder().encode("Keyboard123"));
         when(users.findByIdForWithdrawal(7)).thenReturn(Optional.of(user));
-        var service = new UserService(users,provider,new BCryptPasswordEncoder());
+        var service = new UserService(users,null,provider,new BCryptPasswordEncoder());
         assertThatThrownBy(() -> service.withdraw(7,"Keyboard123")).isInstanceOf(InvalidStateException.class);
         assertThat(user.isDeleted()).isFalse();
         assertThat(user.getEmail()).isEqualTo("member@example.com");
@@ -40,7 +40,7 @@ class MemberServiceTests {
         user.setEmail("member@example.com");
         user.setPassword(new BCryptPasswordEncoder().encode("Keyboard123"));
         when(users.findByIdForWithdrawal(7)).thenReturn(Optional.of(user));
-        var service = new UserService(users,provider,new BCryptPasswordEncoder());
+        var service = new UserService(users,null,provider,new BCryptPasswordEncoder());
         assertThatThrownBy(() -> service.withdraw(7,"Wrong123")).isInstanceOf(AuthorizationFailureException.class);
         assertThat(user.isDeleted()).isFalse();
         assertThat(user.getEmail()).isEqualTo("member@example.com");
