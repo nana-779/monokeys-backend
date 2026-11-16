@@ -38,3 +38,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### 비밀 설정 (DB 계정, JWT 비밀키) ###
+application-secret.properties
