@@ -1,5 +1,6 @@
 package com.green.keyboard_project.dto.product;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,6 +29,7 @@ public class ProductResponseDto {
     private int stockQuantity;
     private int shippingFee;
     private String brand;
+    @JsonProperty("isSoldOut")
     private boolean isSoldOut;
     private String status; // 'ACTIVE' | 'SOLD_OUT'
 
@@ -37,6 +39,9 @@ public class ProductResponseDto {
     private String switchType;
     private Boolean isWireless;
     private Integer pin;
+
+    @Builder.Default
+    private List<Integer> supportPins = new ArrayList<>();
 
     @Builder.Default
     private List<MediaDto> images = new ArrayList<>();

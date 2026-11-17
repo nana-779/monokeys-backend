@@ -72,6 +72,7 @@ public class ProductService {
 
     public ProductResponseDto getProductById(int productId) {
         Product product = productRepository.findById(productId)
+                .filter(p -> !p.isDeleted())
                 .orElseThrow(() -> new ResourceNotFountException("상품을 찾을 수 없습니다. (ID: " + productId + ")"));
         List<ProductImage> galleryEntities = productImageRepository.findByProduct_ProductIdOrderByDisplayOrderAsc(productId);
         return toDto(product, galleryEntities);
@@ -124,6 +125,7 @@ public class ProductService {
         String switchType = null;
         Boolean isWireless = null;
         Integer pin = null;
+        List<Integer> supportPins = Collections.emptyList();
 
         if (spec != null) {
             layout = spec.getLayout();
@@ -132,6 +134,7 @@ public class ProductService {
             switchType = spec.getSwitchType();
             isWireless = spec.getIsWireless();
             pin = spec.getSwitchPin();
+            supportPins = parseSupportPins(spec.getSupportPins());
         }
 
         return ProductResponseDto.builder()
@@ -155,8 +158,19 @@ public class ProductService {
                 .switchType(switchType)
                 .isWireless(isWireless)
                 .pin(pin)
+                .supportPins(supportPins)
                 .images(images)
                 .galleryImages(gallery)
                 .build();
+    }
+
+    private List<Integer> parseSupportPins(String rawPins) {
+        if (rawPins == null || rawPins.isBlank()) {
+            return Collections.emptyList();
+        }
+        List<Integer> pins = new ArrayList<>();
+        if (rawPins.contains("3")) pins.add(3);
+        if (rawPins.contains("5")) pins.add(5);
+        return pins;
     }
 }

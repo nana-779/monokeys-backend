@@ -53,6 +53,12 @@ public class Product {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "is_deleted", nullable = false)
+    private boolean isDeleted;
+
+    @Column(name = "deleted_at", nullable = true)
+    private LocalDateTime deletedAt;
+
     /**
      * 카테고리 계층 구조(소분류 -> 대분류)를 기반으로 부품 구분을 동적 계산
      */
