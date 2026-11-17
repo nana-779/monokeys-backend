@@ -37,5 +37,11 @@ out/
 ### VS Code ###
 .vscode/
 
+<<<<<<< HEAD
 ### 비밀 설정 (DB 계정, JWT 비밀키) ###
 application-secret.properties
+=======
+# Personal payment/database environment files; share names only.
+.env*
+!.env.example
+>>>>>>> feature/payment
