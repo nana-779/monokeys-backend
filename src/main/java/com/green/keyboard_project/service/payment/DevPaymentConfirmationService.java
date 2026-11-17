@@ -1,10 +1,10 @@
-package com.green.keyboard_project.service;
+package com.green.keyboard_project.service.payment;
 
 import com.green.keyboard_project.config.tosspayments.TossPaymentsClient;
 import com.green.keyboard_project.dev.tossorders.DevTossOrderService;
 import com.green.keyboard_project.dto.payment.*;
 import com.green.keyboard_project.exceptions.PaymentConfirmationException;
-import com.green.keyboard_project.service.payment.InMemoryPaymentConfirmationStore;
+
 import java.util.Set;
 
 /** 개발 승인 흐름에서는 회원 서비스·주문 저장소·DB 변경 트랜잭션을 사용하지 않습니다. */
