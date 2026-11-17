@@ -3,7 +3,7 @@ package com.green.keyboard_project.controller;
 import com.green.keyboard_project.config.tosspayments.DevPaymentConfirmationConfiguration;
 import com.green.keyboard_project.dto.ApiResponse;
 import com.green.keyboard_project.dto.payment.*;
-import com.green.keyboard_project.service.DevPaymentConfirmationService;
+import com.green.keyboard_project.service.payment.DevPaymentConfirmationService;
 import jakarta.validation.Valid;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.http.*;

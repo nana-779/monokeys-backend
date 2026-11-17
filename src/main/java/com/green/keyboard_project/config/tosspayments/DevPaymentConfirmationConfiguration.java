@@ -3,7 +3,7 @@ package com.green.keyboard_project.config.tosspayments;
 import com.green.keyboard_project.controller.DevPaymentConfirmationController;
 import com.green.keyboard_project.controller.DevPaymentConfirmationExceptionHandler;
 import com.green.keyboard_project.dev.tossorders.DevTossOrderService;
-import com.green.keyboard_project.service.DevPaymentConfirmationService;
+import com.green.keyboard_project.service.payment.DevPaymentConfirmationService;
 import com.green.keyboard_project.service.payment.InMemoryPaymentConfirmationStore;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.Environment;
