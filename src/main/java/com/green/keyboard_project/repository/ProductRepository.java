@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Integer> {
 
-    @Query("SELECT p FROM Product p WHERE p.isDeleted = false AND " +
+    @Query("SELECT p FROM Product p WHERE p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0 AND " +
            "(:category IS NULL OR :category = 'all' OR p.category.categoryId = :category OR (p.category.parent IS NOT NULL AND p.category.parent.categoryId = :category)) AND " +
            "(:subcategory IS NULL OR p.category.categoryId = :subcategory)")
     Page<Product> findFilteredProducts(@Param("category") String category,

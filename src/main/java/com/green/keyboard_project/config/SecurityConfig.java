@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -46,13 +47,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/users/signup", "/api/auth/check-email").permitAll()
                         .requestMatchers("/api/auth/me").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers(
-                                "/api/categories/**",
-                                "/api/products/**",
-                                "/swagger-ui/**",
-                                "/v3/api-docs/**",
-                                "/swagger-resources/**"
-                        ).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/products/**").permitAll()
+                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
                         // TODO: 보호 페이지 목록(회의 안건) 확정 후 장바구니·주문·마이페이지 API 추가
                         .anyRequest().permitAll())
                 .exceptionHandling(e -> e

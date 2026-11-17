@@ -80,7 +80,7 @@ public class ProductService {
 
     public ProductResponseDto getProductById(int productId) {
         Product product = productRepository.findById(productId)
-                .filter(p -> !p.isDeleted())
+                .filter(p -> !p.isDeleted() && p.isActive() && p.getStockQuantity() > 0)
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다. (ID: " + productId + ")"));
         List<ProductImage> galleryEntities = productImageRepository.findByProduct_ProductIdOrderByDisplayOrderAsc(productId);
         return toDto(product, galleryEntities);
@@ -260,21 +260,6 @@ public class ProductService {
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
         product.setActive(false);
         product.setUpdatedAt(LocalDateTime.now());
-    }
-
-    @Transactional(readOnly = true)
-    public List<ProductResponse> getActiveProducts() {
-        return productRepository.findAll().stream().filter(Product::isActive)
-                .map(product -> ProductResponse.from(product, productSpecRepository.findById(product.getProductId()).orElse(null)))
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public ProductResponse getActiveProduct(int productId) {
-        Product product = productRepository.findById(productId)
-                .filter(Product::isActive)
-                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
-        return ProductResponse.from(product, productSpecRepository.findById(productId).orElse(null));
     }
 
     private Category findRootCategory(String categoryName) {
