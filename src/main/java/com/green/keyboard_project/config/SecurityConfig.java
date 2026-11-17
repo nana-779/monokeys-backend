@@ -32,7 +32,7 @@ public class SecurityConfig {
                     "/v3/api-docs/**",
                     "/swagger-resources/**"
                 ).permitAll()
-                .anyRequest().permitAll()
+                .anyRequest().authenticated()
             );
 
         return http.build();
