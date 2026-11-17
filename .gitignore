@@ -39,5 +39,8 @@ out/
 ### VS Code ###
 .vscode/
 
-### 비밀 설정 (DB 계정, JWT 비밀키) ###
-src/main/resources/application-secret.properties
+### Sensitive Information / DB Secret ###
+**/application-secret.properties
+**/application-local.properties
+.env
+.env.*
