@@ -1,12 +1,12 @@
 package com.green.keyboard_project.service;
 
-import com.green.keyboard_project.dto.cart.CartItemResponse;
+import com.green.keyboard_project.dto.CartItemResponse;
 import com.green.keyboard_project.entity.CartItem;
 import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFountException;
-import com.green.keyboard_project.repository.cart.CartItemRepository;
+import com.green.keyboard_project.repository.CartItemRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
