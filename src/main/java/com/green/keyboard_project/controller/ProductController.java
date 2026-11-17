@@ -18,15 +18,5 @@ import java.util.List;
 @CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"})
 @RequiredArgsConstructor
 public class ProductController {
-    private final ProductService productService;
 
-    @GetMapping
-    public ResponseEntity<ApiResponse<List<ProductResponse>>> getProducts() {
-        return ResponseEntity.ok(ApiResponse.ok(productService.getActiveProducts()));
-    }
-
-    @GetMapping("/{productId}")
-    public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable int productId) {
-        return ResponseEntity.ok(ApiResponse.ok(productService.getActiveProduct(productId)));
-    }
 }
