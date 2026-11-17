@@ -3,7 +3,7 @@ package com.green.keyboard_project.controller;
 import com.green.keyboard_project.dto.ApiResponse;
 import com.green.keyboard_project.dto.CartItemResponse;
 import com.green.keyboard_project.exceptions.InvalidStateException;
-import com.green.keyboard_project.exceptions.ResourceNotFountException;
+import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
 import com.green.keyboard_project.service.CartService;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +43,7 @@ public class CartController {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
         if (request.getProductId() == null) {
-            throw new ResourceNotFountException("존재하지 않는 상품입니다.");
+            throw new ResourceNotFoundException("존재하지 않는 상품입니다.");
         }
         if (request.getQuantity() == null) {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
