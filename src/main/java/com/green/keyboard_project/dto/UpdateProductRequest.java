@@ -12,10 +12,6 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 public class UpdateProductRequest {
-    @Pattern(regexp = ".*\\S.*", message = "카테고리명은 공백일 수 없습니다.")
-    @Size(max = 100)
-    private String categoryName;
-
     @Pattern(regexp = ".*\\S.*", message = "상품명은 공백일 수 없습니다.")
     @Size(max = 200)
     private String name;
