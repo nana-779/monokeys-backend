@@ -12,19 +12,23 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/dev/toss-orders")
 public class DevTossOrderController {
     private final DevTossOrderService orders;
+    // 개발 주문 전용 서비스를 연결하며 실제 주문 저장소는 사용하지 않습니다.
     public DevTossOrderController(DevTossOrderService orders) { this.orders = orders; }
 
+    // 입력 본문·쿼리 없이 테스트 주문을 생성하고 공통 응답으로 반환합니다. 브라우저가 금액을 지정하지 못하게 합니다.
     @PostMapping
-    public ResponseEntity<ApiResponse<DevTossOrder>> create(
+    public ResponseEntity<ApiResponse<DevTossOrder>> createDevTestOrder(
             @RequestBody(required = false) String body,
             @RequestParam java.util.Map<String, String> parameters) {
+        // 브라우저 입력으로 주문이나 금액을 바꾸지 못하도록 본문과 쿼리 입력을 모두 거부합니다.
         if ((body != null && !body.isBlank()) || !parameters.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "테스트 주문 생성은 입력값을 받지 않습니다.");
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(orders.create()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(orders.createDevTestOrder()));
     }
+    // 프론트가 결제 전 주문번호와 금액을 다시 확인할 수 있도록 개발 주문을 조회합니다.
     @GetMapping("/{orderId}")
-    public ApiResponse<DevTossOrder> find(@PathVariable String orderId) {
-        return ApiResponse.ok(orders.find(orderId));
+    public ApiResponse<DevTossOrder> getDevTestOrder(@PathVariable String orderId) {
+        return ApiResponse.ok(orders.getDevTestOrder(orderId));
     }
 }

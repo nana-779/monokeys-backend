@@ -10,23 +10,23 @@ import org.springframework.web.server.ResponseStatusException;
 
 class DevTossOrderServiceTests {
     private static final String ID = "dev_" + "a".repeat(32);
-    @Test void fixedServerAmountAndLookup() {
+    @Test void createDevTestOrderUsesFixedServerAmountAndGetDevTestOrderReturnsIt() {
         var service = new DevTossOrderService();
-        var order = service.create();
+        var order = service.createDevTestOrder();
         assertThat(order.amount()).isEqualTo(10000);
         assertThat(order.currency()).isEqualTo("KRW");
         assertThat(order.status()).isEqualTo("PENDING");
-        assertThat(service.find(order.orderId())).isEqualTo(order);
-        assertThatThrownBy(() -> service.find("bad")).isInstanceOf(ResponseStatusException.class)
+        assertThat(service.getDevTestOrder(order.orderId())).isEqualTo(order);
+        assertThatThrownBy(() -> service.getDevTestOrder("bad")).isInstanceOf(ResponseStatusException.class)
             .satisfies(e -> assertThat(((ResponseStatusException)e).getStatusCode().value()).isEqualTo(400));
-        assertThatThrownBy(() -> service.find(ID)).isInstanceOf(ResponseStatusException.class)
+        assertThatThrownBy(() -> service.getDevTestOrder(ID)).isInstanceOf(ResponseStatusException.class)
             .satisfies(e -> assertThat(((ResponseStatusException)e).getStatusCode().value()).isEqualTo(404));
     }
     @Test void concurrentRequestsHaveUniqueIds() throws Exception {
         var service = new DevTossOrderService();
         try (var executor = Executors.newFixedThreadPool(12)) {
             var calls = new ArrayList<Callable<String>>();
-            for (int i=0; i<300; i++) calls.add(() -> service.create().orderId());
+            for (int i=0; i<300; i++) calls.add(() -> service.createDevTestOrder().orderId());
             var ids = new HashSet<String>();
             for (var future : executor.invokeAll(calls)) assertThat(ids.add(future.get())).isTrue();
             assertThat(ids).hasSize(300);
@@ -36,15 +36,15 @@ class DevTossOrderServiceTests {
         var count = new AtomicInteger();
         var service = new DevTossOrderService(Clock.systemUTC(),
             () -> count.incrementAndGet() <= 2 ? ID : "dev_"+"b".repeat(32), 10);
-        var first = service.create();
-        var second = service.create();
+        var first = service.createDevTestOrder();
+        var second = service.createDevTestOrder();
         assertThat(first.orderId()).isNotEqualTo(second.orderId());
-        assertThat(service.find(first.orderId())).isSameAs(first);
+        assertThat(service.getDevTestOrder(first.orderId())).isSameAs(first);
     }
     @Test void repeatedCollisionsFailInsteadOfOverwriting() {
         var service = new DevTossOrderService(Clock.systemUTC(), () -> ID, 10);
-        service.create();
-        assertThatThrownBy(service::create).isInstanceOf(ResponseStatusException.class)
+        service.createDevTestOrder();
+        assertThatThrownBy(service::createDevTestOrder).isInstanceOf(ResponseStatusException.class)
             .satisfies(e -> assertThat(((ResponseStatusException)e).getStatusCode().value()).isEqualTo(503));
     }
     @Test void expiryAndCapacityAreBounded() {
@@ -55,11 +55,11 @@ class DevTossOrderServiceTests {
             public Instant instant() {return instant.get();}
         };
         var service = new DevTossOrderService(clock, () -> ID, 1);
-        service.create();
-        assertThatThrownBy(service::create).isInstanceOf(ResponseStatusException.class)
+        service.createDevTestOrder();
+        assertThatThrownBy(service::createDevTestOrder).isInstanceOf(ResponseStatusException.class)
             .satisfies(e -> assertThat(((ResponseStatusException)e).getStatusCode().value()).isEqualTo(429));
         instant.set(instant.get().plusSeconds(1800));
-        assertThatThrownBy(() -> service.find(ID)).isInstanceOf(ResponseStatusException.class);
-        assertThat(service.create()).isNotNull();
+        assertThatThrownBy(() -> service.getDevTestOrder(ID)).isInstanceOf(ResponseStatusException.class);
+        assertThat(service.createDevTestOrder()).isNotNull();
     }
 }

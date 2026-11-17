@@ -44,7 +44,7 @@ class DevPaymentConfirmationApiTests {
     @BeforeEach void setup() {
         reset(client);
         mvc = MockMvcBuilders.webAppContextSetup(context).addFilters(context.getBean(FilterChainProxy.class)).build();
-        order = orders.create().orderId();
+        order = orders.createDevTestOrder().orderId();
         key = "fixture_" + order;
         when(client.confirm(any(), anyLong(), anyString())).thenReturn(TossPaymentsClient.Reply.payment(
                 new TossPaymentResponse(key, order, 10000, "KRW", "DONE", "카드",

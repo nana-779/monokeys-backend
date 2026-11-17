@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice(assignableTypes = DevTossOrderController.class)
 @Order(0)
 public class DevTossOrderErrors {
+    // 잘못된 번호·만료·저장 한도 오류를 개발 주문 API에만 적용되는 공통 실패 응답으로 바꿉니다.
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiResponse<Void>> handle(ResponseStatusException error) {
         return ResponseEntity.status(error.getStatusCode()).body(ApiResponse.fail(error.getReason()));

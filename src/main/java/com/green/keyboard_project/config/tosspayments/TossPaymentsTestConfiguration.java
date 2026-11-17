@@ -10,6 +10,7 @@ import org.springframework.core.env.Environment;
 @ConditionalOnProperty(prefix = "toss.payments.test", name = "enabled", havingValue = "true")
 public class TossPaymentsTestConfiguration {
 
+    // 테스트 기능이 켜졌을 때만 환경변수에서 시크릿 키를 읽어 서버 전용 객체로 만듭니다. 값은 응답이나 로그로 내보내지 않습니다.
     @Bean
     TossPaymentsTestCredentials tossPaymentsTestCredentials(Environment environment) {
         final String secretKey;

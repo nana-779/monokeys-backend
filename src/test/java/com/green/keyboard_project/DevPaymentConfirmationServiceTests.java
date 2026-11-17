@@ -28,7 +28,7 @@ class DevPaymentConfirmationServiceTests {
         orders = new DevTossOrderService();
         client = mock(TossPaymentsClient.class);
         service = new DevPaymentConfirmationService(orders, new InMemoryPaymentConfirmationStore(1000), client);
-        request = new PaymentConfirmationRequest("fixture_payment_only", orders.create().orderId(), 10000L);
+        request = new PaymentConfirmationRequest("fixture_payment_only", orders.createDevTestOrder().orderId(), 10000L);
     }
 
     @Test void successfulApprovalIsValidatedAndReplayedWithoutAnotherPost() {
@@ -127,7 +127,7 @@ class DevPaymentConfirmationServiceTests {
         service.confirm(request);
         assertCode(() -> service.confirm(new PaymentConfirmationRequest("other_key", request.orderId(), 10000L)), "PAYMENT_REQUEST_CONFLICT");
         assertCode(() -> service.confirm(new PaymentConfirmationRequest(request.paymentKey(), request.orderId(), 20000L)), "PAYMENT_REQUEST_CONFLICT");
-        assertCode(() -> service.confirm(new PaymentConfirmationRequest(request.paymentKey(), orders.create().orderId(), 10000L)), "PAYMENT_REQUEST_CONFLICT");
+        assertCode(() -> service.confirm(new PaymentConfirmationRequest(request.paymentKey(), orders.createDevTestOrder().orderId(), 10000L)), "PAYMENT_REQUEST_CONFLICT");
         verify(client, times(1)).confirm(any(), anyLong(), anyString());
     }
 
@@ -193,20 +193,20 @@ class DevPaymentConfirmationServiceTests {
         service = new DevPaymentConfirmationService(orders, new InMemoryPaymentConfirmationStore(1), client);
         when(client.confirm(any(), anyLong(), anyString())).thenReturn(TossPaymentsClient.Reply.failure(0, "TRANSPORT_ERROR", true));
         service.confirm(request);
-        assertCode(() -> service.confirm(new PaymentConfirmationRequest("other_key", orders.create().orderId(), 10000L)), "PAYMENT_CONFIRM_CAPACITY_EXCEEDED");
+        assertCode(() -> service.confirm(new PaymentConfirmationRequest("other_key", orders.createDevTestOrder().orderId(), 10000L)), "PAYMENT_CONFIRM_CAPACITY_EXCEEDED");
         verify(client, times(1)).confirm(any(), anyLong(), anyString());
     }
 
     @Test void recheckingAnUnknownApprovalUsesPinnedOrderEvenAfterDevOrderExpiry() {
         var source = mock(DevTossOrderService.class);
-        when(source.find(request.orderId())).thenReturn(new DevTossOrder(request.orderId(), "fixture", 10000, "KRW", "PENDING"))
+        when(source.getDevTestOrder(request.orderId())).thenReturn(new DevTossOrder(request.orderId(), "fixture", 10000, "KRW", "PENDING"))
                 .thenThrow(new IllegalStateException("order expired"));
         service = new DevPaymentConfirmationService(source, new InMemoryPaymentConfirmationStore(1), client);
         when(client.confirm(any(), anyLong(), anyString())).thenReturn(TossPaymentsClient.Reply.failure(0, "TRANSPORT_ERROR", true));
         when(client.find(anyString())).thenReturn(TossPaymentsClient.Reply.payment(done()));
         service.confirm(request);
         assertThat(service.confirm(request).completed()).isTrue();
-        verify(source, times(1)).find(request.orderId());
+        verify(source, times(1)).getDevTestOrder(request.orderId());
     }
 
     @Test void contradictoryWaitingResponseIsUnknownAndRecoveredByGetOnly() {
