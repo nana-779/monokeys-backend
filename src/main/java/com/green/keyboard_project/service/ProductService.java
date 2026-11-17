@@ -1,6 +1,7 @@
 package com.green.keyboard_project.service;
 
 import com.green.keyboard_project.dto.CreateProductRequest;
+import com.green.keyboard_project.dto.UpdateProductRequest;
 import com.green.keyboard_project.dto.ProductResponse;
 import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.Product;
@@ -24,6 +25,7 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
     private final ProductSpecRepository productSpecRepository;
 
+    // 관리자 상품 등록
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request, String imageUrl) {
         Category category = findRootCategory(request.getCategoryName());
@@ -58,31 +60,45 @@ public class ProductService {
         return ProductResponse.from(savedProduct, productSpec);
     }
 
+    // 관리자 상품 수정
     @Transactional
-    public ProductResponse updateProduct(int productId, CreateProductRequest request, String newImageUrl) {
+    public ProductResponse updateProduct(int productId, UpdateProductRequest request, String newImageUrl) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
-        Category category = findRootCategory(request.getCategoryName());
-        product.setCategory(category);
-        product.setName(request.getName());
-        product.setBasePrice(request.getBasePrice());
-        product.setStockQuantity(request.getStockQuantity());
-        product.setDescription(request.getDescription());
+
+        if (request.getCategoryName() != null) {
+            product.setCategory(findRootCategory(request.getCategoryName().trim()));
+        }
+        if (request.getName() != null) product.setName(request.getName().trim());
+        if (request.getBasePrice() != null) product.setBasePrice(request.getBasePrice());
+        if (request.getStockQuantity() != null) product.setStockQuantity(request.getStockQuantity());
+        if (request.getDescription() != null) product.setDescription(request.getDescription());
         if (newImageUrl != null) product.setThumbnailUrl(newImageUrl);
         product.setUpdatedAt(LocalDateTime.now());
-        ProductSpec spec = productSpecRepository.findById(productId).orElseGet(() -> {
-            ProductSpec created = new ProductSpec();
-            created.setProduct(product);
-            return created;
-        });
-        spec.setLayout(request.getLayout());
-        spec.setHousingMaterial(request.getHousingMaterial());
-        spec.setSupportPins(request.getSupportPins());
-        spec.setIsWireless(request.getIsWireless());
-        spec.setSwitchPin(request.getSwitchPin());
-        spec.setSwitchType(request.getSwitchType());
-        spec.setKeycapMaterial(request.getKeycapMaterial());
-        productSpecRepository.save(spec);
+
+        ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
+        boolean hasSpecChanges = request.getLayout() != null
+                || request.getHousingMaterial() != null
+                || request.getSupportPins() != null
+                || request.getIsWireless() != null
+                || request.getSwitchPin() != null
+                || request.getSwitchType() != null
+                || request.getKeycapMaterial() != null;
+        if (spec == null && hasSpecChanges) {
+            spec = new ProductSpec();
+            spec.setProduct(product);
+        }
+        if (spec != null) {
+            if (request.getLayout() != null) spec.setLayout(request.getLayout().trim());
+            if (request.getHousingMaterial() != null) spec.setHousingMaterial(request.getHousingMaterial().trim());
+            if (request.getSupportPins() != null) spec.setSupportPins(request.getSupportPins().trim());
+            if (request.getIsWireless() != null) spec.setIsWireless(request.getIsWireless());
+            if (request.getSwitchPin() != null) spec.setSwitchPin(request.getSwitchPin());
+            if (request.getSwitchType() != null) spec.setSwitchType(request.getSwitchType().trim());
+            if (request.getKeycapMaterial() != null) spec.setKeycapMaterial(request.getKeycapMaterial().trim());
+            if (hasSpecChanges) productSpecRepository.save(spec);
+        }
+
         Product saved = productRepository.save(product);
         return ProductResponse.from(saved, spec);
     }

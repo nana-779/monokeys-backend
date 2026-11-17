@@ -2,6 +2,7 @@ package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.ApiResponse;
 import com.green.keyboard_project.dto.CreateProductRequest;
+import com.green.keyboard_project.dto.UpdateProductRequest;
 import com.green.keyboard_project.service.ProductService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
@@ -47,10 +48,11 @@ public class AdminProductController {
         }
     }
 
-    @PatchMapping(value = "/{productId}/edit", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    // 관리자 상품 수정
+    @PatchMapping(value = "/{productId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
             @PathVariable int productId,
-            @Valid @RequestPart("product") CreateProductRequest request,
+            @Valid @RequestPart("product") UpdateProductRequest request,
             @RequestPart(value = "image", required = false) MultipartFile image
     ) {
         String newImageUrl = image != null && !image.isEmpty() ? imageStorageService.store(image) : null;
