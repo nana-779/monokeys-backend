@@ -58,6 +58,7 @@ class BuildControllerIntegrationTests {
     private Product switchLinear5Pin;
     private Product switchTactile3Pin;
     private Product keycapPbt;
+    private Product customKeycap;
     private Product soldOutKeycap;
 
     @BeforeEach
@@ -77,6 +78,10 @@ class BuildControllerIntegrationTests {
         Category catSwitchLinear = saveCategory("switch-linear", catSwitch, "리니어", 4);
         Category catSwitchTactile = saveCategory("switch-tactile", catSwitch, "택타일", 5);
         Category catKeycapPbt = saveCategory("keycap-pbt", catKeycap, "PBT", 6);
+        Category catKeycapCustom = saveCategory("keycap-custom", catKeycap, "커스텀 풀 컬러 키캡", 7);
+
+        customKeycap = saveProduct(catKeycapCustom, "커스텀 풀 컬러 키캡 (R1)", 2700, 999, true);
+        saveSpec(customKeycap, null, null, null, null, null, null, "PBT");
 
         housing87 = saveProduct(catHousingAlu, "알루미늄 87 하우징", 100000, 10, true);
         saveSpec(housing87, "87", "알루미늄", null, null, null, null, null);
@@ -196,6 +201,24 @@ class BuildControllerIntegrationTests {
                 soldOutKeycap.getProductId()
         );
         mvc.perform(post("/api/builds/manual").contentType("application/json").content(soldOutRequest))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+
+        // 4) keycap-custom 단품 키캡 선택 -> 400
+        String customKeycapRequest = """
+                {
+                  "housingProductId": %d,
+                  "pcbProductId": %d,
+                  "switchProductId": %d,
+                  "keycapProductId": %d
+                }
+                """.formatted(
+                housing87.getProductId(),
+                pcb87Wireless.getProductId(),
+                switchLinear5Pin.getProductId(),
+                customKeycap.getProductId()
+        );
+        mvc.perform(post("/api/builds/manual").contentType("application/json").content(customKeycapRequest))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
     }
