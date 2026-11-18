@@ -1,15 +1,15 @@
 -- =============================================================================
 -- 키보드 이커머스 (keyboard_shop) 샘플 데이터 INSERT 스크립트 (최신화 버전)
--- 1. 카테고리 (계층형 22개 - pcb 통합)
--- 2. 64개 활성 단일 상품 (비활성·품절·단종 8건 제외 / is_deleted, deleted_at 포함)
--- 3. 64개 상품 상세 스펙 (product_spec 1:1 매핑)
--- 4. 256건 상품 다중 갤러리 이미지 (product_image 1:N 매핑, 상품당 4장)
+-- 1. 카테고리 (계층형 23개 - pcb 통합 + keycap-custom 추가)
+-- 2. 71개 활성 단일 상품 (기존 64종 + 커스텀 풀 컬러 키캡 7종)
+-- 3. 71개 상품 상세 스펙 (product_spec 1:1 매핑)
+-- 4. 284건 상품 다중 갤러리 이미지 (product_image 1:N 매핑, 상품당 4장)
 -- =============================================================================
 
 USE `keyboard_shop`;
 SET NAMES utf8mb4;
 
--- 1. 카테고리 마스터 데이터 (대분류 4개 + 소분류 18개)
+-- 1. 카테고리 마스터 데이터 (대분류 4개 + 소분류 19개)
 INSERT INTO `category` (`category_id`, `parent_id`, `name`, `display_order`) VALUES
 ('housing', NULL, '하우징', 1),
 ('pcb', NULL, '기판 (PCB)', 2),
@@ -32,10 +32,11 @@ INSERT INTO `category` (`category_id`, `parent_id`, `name`, `display_order`) VAL
 ('switch-click', 'switches', '클릭', 15),
 ('keycap-pbt', 'keycaps', 'PBT', 16),
 ('keycap-abs', 'keycaps', 'ABS', 17),
-('keycap-pom', 'keycaps', 'POM', 18)
+('keycap-pom', 'keycaps', 'POM', 18),
+('keycap-custom', 'keycaps', '커스텀 풀 컬러 키캡', 19)
 ON DUPLICATE KEY UPDATE `parent_id`=VALUES(`parent_id`), `name`=VALUES(`name`), `display_order`=VALUES(`display_order`);
 
--- 2. 단일 상품 마스터 (product) 64개 - part_type 제거 및 is_deleted/deleted_at 반영
+-- 2. 단일 상품 마스터 (product) 71개 - part_type 제거 및 is_deleted/deleted_at 반영
 INSERT INTO `product` (`product_id`, `category_id`, `name`, `base_price`, `stock_quantity`, `thumbnail_url`, `description`, `is_active`, `is_deleted`, `deleted_at`, `version`, `created_at`, `updated_at`) VALUES
 (101, 'housing-alu', '알루미늄 하우징 Aster 65', 89000, 20, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', '정밀 가공 알루미늄으로 제작된 65배열 Aster 하우징입니다.', TRUE, FALSE, NULL, 0, NOW(), NOW()),
 (102, 'housing-alu', '알루미늄 하우징 Nova 65', 95000, 18, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', '세련된 마감과 안정적인 무게감을 제공하는 65배열 Nova 하우징입니다.', TRUE, FALSE, NULL, 0, NOW(), NOW()),
@@ -100,10 +101,17 @@ INSERT INTO `product` (`product_id`, `category_id`, `name`, `base_price`, `stock
 (84, 'keycap-pbt', '세이지 그린 PBT 염료승화 키캡', 46000, 24, 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80', '차분한 허브향이 느껴지는 감성적인 세이지 그린 톤의 PBT 승화 키캡 세트입니다.', TRUE, FALSE, NULL, 0, NOW(), NOW()),
 (85, 'keycap-pbt', '레트로 카본 체리프로파일 PBT 승화 키캡', 49000, 20, 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?auto=format&fit=crop&w=800&q=80', '진한 카본 그레이와 오렌지 포인트 키캡의 강렬한 조화가 일품인 키캡 세트입니다.', TRUE, FALSE, NULL, 0, NOW(), NOW()),
 (86, 'keycap-pom', '프로스트 스모크 POM 반투명 측각 키캡', 39000, 27, 'https://images.unsplash.com/photo-1601445638532-3c6f6c3aa1d6?auto=format&fit=crop&w=800&q=80', '은은한 스모키 반투명 블랙 재질에 정갈한 측면 각인으로 고급스러움을 더했습니다.', TRUE, FALSE, NULL, 0, NOW(), NOW()),
-(87, 'keycap-pom', '버블검 핑크 POM 글로시 키캡', 37000, 23, 'https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=800&q=80', '매끄러운 POM 고유의 질감과 사랑스러운 핑크 컬러가 돋보이는 키캡 세트입니다.', TRUE, FALSE, NULL, 0, NOW(), NOW())
+(87, 'keycap-pom', '버블검 핑크 POM 글로시 키캡', 37000, 23, 'https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=800&q=80', '매끄러운 POM 고유의 질감과 사랑스러운 핑크 컬러가 돋보이는 키캡 세트입니다.', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(901, 'keycap-custom', '커스텀 풀 컬러 키캡 (R1)', 2700, 999, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 'ESC·F열·숫자열 전용 1u 규격 커스텀 키캡입니다. 화이트 PBT 소재에 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 1.78 x 1.78 x 1.05cm)', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(902, 'keycap-custom', '커스텀 풀 컬러 키캡 (R2)', 2700, 999, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 'QWERTY 상단 알파열 전용 1u 규격 커스텀 키캡입니다. 화이트 PBT 소재에 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 1.78 x 1.78 x 1.05cm)', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(903, 'keycap-custom', '커스텀 풀 컬러 키캡 (R3)', 2700, 999, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 'ASDF 홈 로우 중심열 전용 1u 규격 커스텀 키캡입니다. 화이트 PBT 소재에 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 1.78 x 1.78 x 1.05cm)', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(904, 'keycap-custom', '커스텀 풀 컬러 키캡 (R4)', 2700, 999, 'https://images.unsplash.com/photo-1541140532154-b024d705b909?auto=format&fit=crop&w=800&q=80', 'ZXCV 하단·방향키열 전용 1u 규격 커스텀 키캡입니다. 화이트 PBT 소재에 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 1.78 x 1.78 x 1.16cm)', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(905, 'keycap-custom', '커스텀 풀 컬러 키캡 (Enter)', 7200, 999, 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80', '엔터키 전용 2.25u 와이드 커스텀 키캡입니다. 화이트 PBT 소재에 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 4.1 x 1.78 x 1.05cm)', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(906, 'keycap-custom', '커스텀 풀 컬러 키캡 (Left Shift)', 7200, 999, 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?auto=format&fit=crop&w=800&q=80', '좌측 시프트키 전용 2.25u 와이드 커스텀 키캡입니다. 화이트 PBT 소재에 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 4.1 x 1.78 x 1.16cm)', TRUE, FALSE, NULL, 0, NOW(), NOW()),
+(907, 'keycap-custom', '커스텀 풀 컬러 키캡 (Space Bar)', 8200, 999, 'https://images.unsplash.com/photo-1601445638532-3c6f6c3aa1d6?auto=format&fit=crop&w=800&q=80', '스페이스바 전용 6.25u 와이드 커스텀 키캡입니다. 화이트 PBT 소재에 파노라마 이미지·텍스트를 5면 풀 컬러 승화전사 인쇄로 제작합니다. (OEM 프로파일, 11.8 x 1.78 x 1.16cm)', TRUE, FALSE, NULL, 0, NOW(), NOW())
 ON DUPLICATE KEY UPDATE `category_id`=VALUES(`category_id`), `name`=VALUES(`name`), `base_price`=VALUES(`base_price`), `stock_quantity`=VALUES(`stock_quantity`), `thumbnail_url`=VALUES(`thumbnail_url`), `description`=VALUES(`description`), `is_active`=VALUES(`is_active`), `is_deleted`=VALUES(`is_deleted`), `deleted_at`=VALUES(`deleted_at`), `updated_at`=NOW();
 
--- 3. 상품 상세 스펙 (product_spec) 64개
+-- 3. 상품 상세 스펙 (product_spec) 71개
 INSERT INTO `product_spec` (`product_id`, `layout`, `housing_material`, `support_pins`, `is_wireless`, `switch_pin`, `switch_type`, `keycap_material`) VALUES
 (101, '65', '알루미늄', NULL, NULL, NULL, NULL, NULL),
 (102, '65', '알루미늄', NULL, NULL, NULL, NULL, NULL),
@@ -168,10 +176,17 @@ INSERT INTO `product_spec` (`product_id`, `layout`, `housing_material`, `support
 (84, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
 (85, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
 (86, NULL, NULL, NULL, NULL, NULL, NULL, 'POM'),
-(87, NULL, NULL, NULL, NULL, NULL, NULL, 'POM')
+(87, NULL, NULL, NULL, NULL, NULL, NULL, 'POM'),
+(901, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
+(902, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
+(903, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
+(904, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
+(905, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
+(906, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT'),
+(907, NULL, NULL, NULL, NULL, NULL, NULL, 'PBT')
 ON DUPLICATE KEY UPDATE `layout`=VALUES(`layout`), `housing_material`=VALUES(`housing_material`), `support_pins`=VALUES(`support_pins`), `is_wireless`=VALUES(`is_wireless`), `switch_pin`=VALUES(`switch_pin`), `switch_type`=VALUES(`switch_type`), `keycap_material`=VALUES(`keycap_material`);
 
--- 4. 상품 다중 갤러리 이미지 (product_image) 256건
+-- 4. 상품 다중 갤러리 이미지 (product_image) 284건
 INSERT INTO `product_image` (`product_id`, `image_url`, `display_order`) VALUES
 (101, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 0),
 (101, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
@@ -428,7 +443,35 @@ INSERT INTO `product_image` (`product_id`, `image_url`, `display_order`) VALUES
 (87, 'https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=800&q=80', 0),
 (87, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 1),
 (87, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 2),
-(87, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 3)
+(87, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 3),
+(901, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 0),
+(901, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 1),
+(901, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 2),
+(901, 'https://images.unsplash.com/photo-1541140532154-b024d705b909?auto=format&fit=crop&w=800&q=80', 3),
+(902, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 0),
+(902, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
+(902, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 2),
+(902, 'https://images.unsplash.com/photo-1541140532154-b024d705b909?auto=format&fit=crop&w=800&q=80', 3),
+(903, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 0),
+(903, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
+(903, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 2),
+(903, 'https://images.unsplash.com/photo-1541140532154-b024d705b909?auto=format&fit=crop&w=800&q=80', 3),
+(904, 'https://images.unsplash.com/photo-1541140532154-b024d705b909?auto=format&fit=crop&w=800&q=80', 0),
+(904, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
+(904, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 2),
+(904, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 3),
+(905, 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=800&q=80', 0),
+(905, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
+(905, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 2),
+(905, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 3),
+(906, 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?auto=format&fit=crop&w=800&q=80', 0),
+(906, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
+(906, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 2),
+(906, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 3),
+(907, 'https://images.unsplash.com/photo-1601445638532-3c6f6c3aa1d6?auto=format&fit=crop&w=800&q=80', 0),
+(907, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80', 1),
+(907, 'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80', 2),
+(907, 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&w=800&q=80', 3)
 ON DUPLICATE KEY UPDATE `image_url`=VALUES(`image_url`);
 
 -- 5. 데이터 등록 검증
