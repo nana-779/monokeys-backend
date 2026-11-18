@@ -35,7 +35,7 @@ public class Payment {
     @Column(name = "pg_provider", nullable = false, length = 50)
     private String pgProvider;
 
-    @Column(name = "pg_tid", nullable = true, length = 100)
+    @Column(name = "pg_tid", nullable = true, length = 200)
     private String pgTid;
 
     @Column(name = "payment_status", nullable = false)

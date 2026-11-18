@@ -224,6 +224,7 @@ CREATE TABLE IF NOT EXISTS `orders` (
     INDEX `idx_orders_status` (`order_status`),
     INDEX `idx_orders_created_at` (`created_at`),
     CONSTRAINT `chk_orders_discount` CHECK (`coupon_discount_amount` >= 0),
+    CONSTRAINT `chk_orders_delivery_fee` CHECK (`delivery_fee` >= 0),
     CONSTRAINT `chk_orders_total_product_amount` CHECK (`total_product_amount` >= 0),
     CONSTRAINT `chk_orders_final_pay_amount` CHECK (`final_pay_amount` >= 0),
     CONSTRAINT `fk_orders_user`
@@ -250,7 +251,7 @@ CREATE TABLE IF NOT EXISTS `product_spec` (
     `layout`           VARCHAR(20) NULL     COMMENT '배열 규격 (87, 75, 65 - 하우징/기판 전용, 키캡은 풀배열 공용으로 NULL)',
     `housing_material` VARCHAR(50) NULL     COMMENT '하우징 소재 (알루미늄, 아크릴, 폴리카보네이트, 목재, 플라스틱)',
     `support_pins`     VARCHAR(20) NULL     COMMENT '기판 지원 핀 규격 (3, 5)',
-    `is_wireless`      BOOLEAN     DEFAULT FALSE COMMENT '무선(블루투스/2.4G) 지원 여부',
+    `is_wireless`      BOOLEAN     NULL     DEFAULT FALSE COMMENT '무선(블루투스/2.4G) 지원 여부',
     `switch_pin`       INT         NULL     COMMENT '스위치 핀 수 (3, 5)',
     `switch_type`      VARCHAR(50) NULL     COMMENT '스위치 분류 (linear, tactile, click, silent)',
     `keycap_material`  VARCHAR(50) NULL     COMMENT '키캡 소재 (PBT, ABS, POM)',
@@ -269,7 +270,6 @@ CREATE TABLE IF NOT EXISTS `product_image` (
     `display_order` INT          NOT NULL DEFAULT 0 COMMENT '노출 순서',
     PRIMARY KEY (`image_id`),
     UNIQUE KEY `uq_product_image_order` (`product_id`, `display_order`),
-    INDEX `idx_product_image_product` (`product_id`, `display_order`),
     CONSTRAINT `fk_product_image_product`
         FOREIGN KEY (`product_id`) REFERENCES `product` (`product_id`)
         ON DELETE CASCADE
@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS `payment` (
     `order_id`       INT          NOT NULL COMMENT '1:1 매핑 주문 ID',
     `payment_method` ENUM('CARD', 'TRANSFER', 'EASY_PAY', 'VIRTUAL_ACCOUNT') NOT NULL COMMENT '결제 수단',
     `pg_provider`    VARCHAR(50)  NOT NULL COMMENT 'PG사 구분 (TOSS, KCP, INICIS 등)',
-    `pg_tid`         VARCHAR(100) NULL     COMMENT 'PG사 승인 거래 고유번호 (TID/결제키)',
+    `pg_tid`         VARCHAR(200) NULL     COMMENT 'PG사 승인 거래 고유번호 (토스 paymentKey 최대 200자 대응)',
     `payment_status` ENUM('READY', 'PAID', 'FAILED', 'CANCELLED') NOT NULL DEFAULT 'READY' COMMENT '결제 진행 상태',
     `paid_amount`    INT          NOT NULL COMMENT '승인 금액',
     `paid_at`        DATETIME     NULL     COMMENT '결제 승인 완료 일시',
@@ -480,7 +480,7 @@ CREATE TABLE IF NOT EXISTS `refund` (
     `amount`        INT          NOT NULL COMMENT '실제 환불 금액 (전액 환불)',
     `reason`        VARCHAR(255) NOT NULL COMMENT '환불 사유',
     `status`        ENUM('REQUESTED', 'COMPLETED', 'REJECTED') NOT NULL DEFAULT 'REQUESTED' COMMENT '환불 처리 상태',
-    `pg_cancel_tid` VARCHAR(100) NULL     COMMENT 'PG 취소 거래 식별자',
+    `pg_cancel_tid` VARCHAR(200) NULL     COMMENT 'PG 취소 거래 식별자 (최대 200자 대응)',
     `requested_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '환불 요청 일시',
     `refunded_at`   DATETIME     NULL     COMMENT '환불 완료 일시',
     PRIMARY KEY (`refund_id`),
@@ -561,7 +561,6 @@ CREATE TABLE IF NOT EXISTS `review_image` (
     `display_order`   INT          NOT NULL DEFAULT 0 COMMENT '노출 순서',
     PRIMARY KEY (`review_image_id`),
     UNIQUE KEY `uq_review_image_order` (`review_id`, `display_order`),
-    INDEX `idx_review_image_review` (`review_id`, `display_order`),
     CONSTRAINT `fk_review_image_review`
         FOREIGN KEY (`review_id`) REFERENCES `review` (`review_id`)
         ON DELETE CASCADE
