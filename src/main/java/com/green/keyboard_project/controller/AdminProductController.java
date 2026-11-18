@@ -2,11 +2,12 @@ package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.ApiResponse;
 import com.green.keyboard_project.dto.CreateProductRequest;
+import com.green.keyboard_project.dto.UpdateProductRequest;
 import com.green.keyboard_project.service.AdminProductService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,17 +29,18 @@ import com.green.keyboard_project.dto.ProductResponse;
 @RequestMapping("/api/admin/products")
 @CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"})
 @AllArgsConstructor
+@Slf4j
 public class AdminProductController {
     private final AdminProductService adminProductService;
     private final ProductImageStorageService imageStorageService;
 
-    // 관리자 전체 상품 조회
+    // 관리자 상품 전체 조회
     @GetMapping
-    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProduct() {
+    public ResponseEntity<ApiResponse<List<ProductResponse>>> getAllProducts() {
         return ResponseEntity.ok(ApiResponse.ok(adminProductService.getAllProducts()));
     }
 
-    // 관리자 상세 상품 조회
+    // 관리자 상품 상세 조회
     @GetMapping("/{productId}")
     public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable int productId) {
         return ResponseEntity.ok(ApiResponse.ok(adminProductService.getProduct(productId)));
@@ -62,14 +64,33 @@ public class AdminProductController {
         }
     }
 
-    // 상품 수정
-    @PatchMapping("/{productId}")
-    public ResponseEntity<ApiResponse<Void>> updateProduct() {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
-                .body(ApiResponse.fail("상품 수정 기능은 현재 준비 중입니다."));
+    // 관리자 상품 수정
+    @PatchMapping(value = "/{productId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
+            @PathVariable int productId,
+            @Valid @RequestPart("product") UpdateProductRequest request,
+            @RequestPart(value = "image", required = false) MultipartFile image
+    ) {
+        String newImageUrl = image != null && !image.isEmpty() ? imageStorageService.store(image) : null;
+        String oldImageUrl = null;
+        ProductResponse updated;
+        try {
+            if (newImageUrl != null) oldImageUrl = adminProductService.getThumbnailUrl(productId);
+            updated = adminProductService.updateProduct(productId, request, newImageUrl);
+        } catch (RuntimeException e) {
+            imageStorageService.deleteByUrl(newImageUrl);
+            throw e;
+        }
+        if (newImageUrl != null) {
+            try {
+                imageStorageService.deleteByUrl(oldImageUrl);
+            } catch (IllegalStateException | SecurityException e) {
+                log.warn("기존 상품 이미지 삭제 실패 (상품 ID: {})", productId, e);
+            }
+        }
+        return ResponseEntity.ok(ApiResponse.ok(updated));
     }
 
-    // 상품 삭제
     @DeleteMapping("/{productId}")
     public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable int productId) {
         adminProductService.deleteProduct(productId);
