@@ -37,6 +37,9 @@ public class CartItem {
     @JoinColumn(name = "auto_build_id", nullable = true)
     private AutoBuild autoBuild;
 
+    @Column(name = "custom_design_data", nullable = true, columnDefinition = "TEXT")
+    private String customDesignData;
+
     @Column(name = "quantity", nullable = false)
     private int quantity;
 

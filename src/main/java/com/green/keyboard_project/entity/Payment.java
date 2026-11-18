@@ -13,7 +13,10 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
-@Table(name = "payment", uniqueConstraints = {@UniqueConstraint(columnNames = {"order_id"})})
+@Table(name = "payment", uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"order_id"}),
+        @UniqueConstraint(columnNames = {"pg_tid"})
+})
 public class Payment {
 
     @Id

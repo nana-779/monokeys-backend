@@ -71,6 +71,7 @@ public class UserService {
         address.setDetailAddress(request.defaultAddress().detailAddress());
         address.setDefault(true);
         address.setCreatedAt(time);
+        address.setUpdatedAt(time);
         addresses.saveAndFlush(address);
         return new SignupResponse((long) user.getUserId(), user.getEmail(), user.getName(),
                 user.getRole().name(), user.isDeleted());

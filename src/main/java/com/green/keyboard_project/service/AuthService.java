@@ -50,7 +50,7 @@ public class AuthService {
             passwordEncoder.matches(password, dummyHash); // 결과는 버리고 시간만 맞춤
             throw new UnauthenticatedException(LOGIN_FAILED);
         }
-        if (!passwordEncoder.matches(password, user.getPassword()) || user.isDeleted()) {
+        if (user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword()) || user.isDeleted()) {
             throw new UnauthenticatedException(LOGIN_FAILED);
         }
 

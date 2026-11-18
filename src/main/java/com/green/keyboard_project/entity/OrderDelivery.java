@@ -60,7 +60,7 @@ public class OrderDelivery {
     private LocalDateTime deliveredAt;
 
     public enum DeliveryStatusType {
-        PREPARING, SHIPPING, DELIVERED, RETURNED
+        PREPARING, SHIPPING, DELIVERED, CANCELLED, RETURNED
     }
 
 }
