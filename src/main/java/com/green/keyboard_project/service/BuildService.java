@@ -296,6 +296,10 @@ public class BuildService {
             );
         }
 
+        if ("KEYCAP".equals(expectedPartType) && isCustomKeycap(product)) {
+            throw new InvalidStateException("커스텀 단품 키캡은 풀 키보드 빌드의 키캡 세트로 선택할 수 없습니다.");
+        }
+
         return new PartWithSpec(product, specMap.get(productId));
     }
 
@@ -414,7 +418,13 @@ public class BuildService {
     private List<Product> filterByPartType(List<Product> products, String partType) {
         return products.stream()
                 .filter(p -> partType.equals(p.getDerivedPartType()))
+                .filter(p -> !"KEYCAP".equals(partType) || !isCustomKeycap(p))
                 .toList();
+    }
+
+    private static boolean isCustomKeycap(Product product) {
+        return product.getCategory() != null
+                && "keycap-custom".equalsIgnoreCase(product.getCategory().getCategoryId());
     }
 
     private Product selectHousing(List<Product> housings, Map<Integer, ProductSpec> specMap, String layout) {
