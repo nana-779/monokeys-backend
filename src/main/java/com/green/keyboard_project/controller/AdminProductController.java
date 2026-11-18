@@ -6,7 +6,6 @@ import com.green.keyboard_project.dto.UpdateProductRequest;
 import com.green.keyboard_project.service.AdminProductService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -29,7 +28,6 @@ import com.green.keyboard_project.dto.ProductResponse;
 @RequestMapping("/api/admin/products")
 @CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"})
 @AllArgsConstructor
-@Slf4j
 public class AdminProductController {
     private final AdminProductService adminProductService;
     private final ProductImageStorageService imageStorageService;
@@ -72,25 +70,18 @@ public class AdminProductController {
             @RequestPart(value = "image", required = false) MultipartFile image
     ) {
         String newImageUrl = image != null && !image.isEmpty() ? imageStorageService.store(image) : null;
-        String oldImageUrl = null;
         ProductResponse updated;
         try {
-            if (newImageUrl != null) oldImageUrl = adminProductService.getThumbnailUrl(productId);
             updated = adminProductService.updateProduct(productId, request, newImageUrl);
         } catch (RuntimeException e) {
             imageStorageService.deleteByUrl(newImageUrl);
             throw e;
         }
-        if (newImageUrl != null) {
-            try {
-                imageStorageService.deleteByUrl(oldImageUrl);
-            } catch (IllegalStateException | SecurityException e) {
-                log.warn("기존 상품 이미지 삭제 실패 (상품 ID: {})", productId, e);
-            }
-        }
+        // 주문내역에서 사용할 수 있도록 교체 전 이미지 파일도 보존합니다.
         return ResponseEntity.ok(ApiResponse.ok(updated));
     }
 
+    // 상품을 논리 삭제하며 주문내역에 필요한 이미지 파일은 보존합니다.
     @DeleteMapping("/{productId}")
     public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable int productId) {
         adminProductService.deleteProduct(productId);
