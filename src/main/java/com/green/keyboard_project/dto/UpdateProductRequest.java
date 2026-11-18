@@ -22,6 +22,8 @@ public class UpdateProductRequest {
     @PositiveOrZero
     private Integer stockQuantity;
 
+    private Boolean active;
+
     private String description;
 
     @Pattern(regexp = ".*\\S.*", message = "배열 규격은 공백일 수 없습니다.")

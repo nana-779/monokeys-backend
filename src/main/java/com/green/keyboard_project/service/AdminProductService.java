@@ -87,6 +87,7 @@ public class AdminProductService {
         product.setUpdatedAt(LocalDateTime.now());
     }
 
+    // 관리자 상품 수정
     // 전달된 항목만 수정하고, 요청에서 빠진 항목은 기존 값을 유지합니다.
     @Transactional
     public ProductResponse updateProduct(int productId, UpdateProductRequest request, String imageUrl) {
@@ -96,6 +97,7 @@ public class AdminProductService {
         if (request.getName() != null) product.setName(request.getName());
         if (request.getBasePrice() != null) product.setBasePrice(request.getBasePrice());
         if (request.getStockQuantity() != null) product.setStockQuantity(request.getStockQuantity());
+        if (request.getActive() != null) product.setActive(request.getActive());
         if (request.getDescription() != null) product.setDescription(request.getDescription());
         if (imageUrl != null) product.setThumbnailUrl(imageUrl);
         product.setUpdatedAt(LocalDateTime.now());
