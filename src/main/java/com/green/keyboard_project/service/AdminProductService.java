@@ -27,7 +27,7 @@ public class AdminProductService {
     // 관리자 상품 등록
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request, String imageUrl) {
-        Category category = findRootCategory(request.getCategoryName());
+        Category category = findSubcategory(request.getCategoryId());
         LocalDateTime now = LocalDateTime.now();
 
         Product product = new Product();
@@ -94,6 +94,12 @@ public class AdminProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
 
+        String previousParentId = parentCategoryId(product.getCategory());
+        if (request.getCategoryId() != null) {
+            product.setCategory(findSubcategory(request.getCategoryId()));
+        }
+        String parentId = parentCategoryId(product.getCategory());
+
         if (request.getName() != null) product.setName(request.getName());
         if (request.getBasePrice() != null) product.setBasePrice(request.getBasePrice());
         if (request.getStockQuantity() != null) product.setStockQuantity(request.getStockQuantity());
@@ -114,6 +120,10 @@ public class AdminProductService {
         if (request.getSwitchPin() != null) spec.setSwitchPin(request.getSwitchPin());
         if (request.getSwitchType() != null) spec.setSwitchType(request.getSwitchType());
         if (request.getKeycapMaterial() != null) spec.setKeycapMaterial(request.getKeycapMaterial());
+
+        if (!parentId.equals(previousParentId)) {
+            clearUnusedSpecs(spec, parentId);
+        }
 
         ProductSpec savedSpec = productSpecRepository.save(spec);
         return ProductResponse.from(product, savedSpec);
@@ -143,19 +153,34 @@ public class AdminProductService {
         return ProductResponse.from(product, productSpecRepository.findById(productId).orElse(null));
     }
 
-    // 카테고리 찾기
-    private Category findRootCategory(String categoryName) {
-        String categoryId = switch (categoryName.trim()) {
-            case "하우징" -> "housing";
-            case "기판", "기판 (PCB)" -> "pcb";
-            case "스위치" -> "switches";
-            case "키캡" -> "keycaps";
-            default -> throw new ResourceNotFoundException("카테고리를 찾을 수 없습니다.");
-        };
-
+    private Category findSubcategory(String categoryId) {
         return categoryRepository.findById(categoryId)
-                .filter(category -> category.getParent() == null)
-                .orElseThrow(() -> new ResourceNotFoundException("카테고리를 찾을 수 없습니다."));
+                .filter(category -> category.getParent() != null && category.getParent().getParent() == null)
+                .orElseThrow(() -> new ResourceNotFoundException("소분류 카테고리를 찾을 수 없습니다."));
     }
 
+    private String parentCategoryId(Category category) {
+        Category parent = category.getParent();
+        return parent == null ? category.getCategoryId() : parent.getCategoryId();
+    }
+
+    private void clearUnusedSpecs(ProductSpec spec, String parentId) {
+        if (!"housing".equals(parentId) && !"pcb".equals(parentId)) {
+            spec.setLayout(null);
+        }
+        if (!"housing".equals(parentId)) {
+            spec.setHousingMaterial(null);
+        }
+        if (!"pcb".equals(parentId)) {
+            spec.setSupportPins(null);
+            spec.setIsWireless(null);
+        }
+        if (!"switches".equals(parentId)) {
+            spec.setSwitchPin(null);
+            spec.setSwitchType(null);
+        }
+        if (!"keycaps".equals(parentId)) {
+            spec.setKeycapMaterial(null);
+        }
+    }
 }
