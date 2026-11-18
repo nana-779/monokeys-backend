@@ -6,6 +6,7 @@ import com.green.keyboard_project.dto.UpdateProductRequest;
 import com.green.keyboard_project.service.AdminProductService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -28,6 +29,7 @@ import com.green.keyboard_project.dto.ProductResponse;
 @RequestMapping("/api/admin/products")
 @CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"})
 @AllArgsConstructor
+@Slf4j
 public class AdminProductController {
     private final AdminProductService adminProductService;
     private final ProductImageStorageService imageStorageService;
@@ -79,7 +81,13 @@ public class AdminProductController {
             imageStorageService.deleteByUrl(newImageUrl);
             throw e;
         }
-        if (newImageUrl != null) imageStorageService.deleteByUrl(oldImageUrl);
+        if (newImageUrl != null) {
+            try {
+                imageStorageService.deleteByUrl(oldImageUrl);
+            } catch (IllegalStateException | SecurityException e) {
+                log.warn("기존 상품 이미지 삭제 실패 (상품 ID: {})", productId, e);
+            }
+        }
         return ResponseEntity.ok(ApiResponse.ok(updated));
     }
 
