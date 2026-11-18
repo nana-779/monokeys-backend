@@ -172,7 +172,7 @@ public class ProductService {
                 .build();
     }
 
-    private List<Integer> parseSupportPins(String rawPins) {
+    public static List<Integer> parseSupportPins(String rawPins) {
         if (rawPins == null || rawPins.isBlank()) {
             return Collections.emptyList();
         }
