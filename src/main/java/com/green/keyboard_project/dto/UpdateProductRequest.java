@@ -12,6 +12,9 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 public class UpdateProductRequest {
+    @Size(min = 1, max = 50)
+    private String categoryId;
+
     @Pattern(regexp = ".*\\S.*", message = "상품명은 공백일 수 없습니다.")
     @Size(max = 200)
     private String name;

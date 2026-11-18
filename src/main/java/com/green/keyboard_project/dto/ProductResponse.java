@@ -1,5 +1,6 @@
 package com.green.keyboard_project.dto;
 
+import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.ProductSpec;
 
@@ -9,6 +10,7 @@ public record ProductResponse(
         int productId,
         String categoryName,
         String categoryId,
+        String parentCategoryId,
         String name,
         int basePrice,
         int stockQuantity,
@@ -25,10 +27,13 @@ public record ProductResponse(
         String keycapMaterial
 ) {
     public static ProductResponse from(Product product, ProductSpec spec) {
+        Category category = product.getCategory();
+        Category parent = category.getParent();
         return new ProductResponse(
                 product.getProductId(),
-                product.getCategory().getName(),
-                product.getCategory().getCategoryId(),
+                category.getName(),
+                category.getCategoryId(),
+                parent == null ? category.getCategoryId() : parent.getCategoryId(),
                 product.getName(),
                 product.getBasePrice(),
                 product.getStockQuantity(),
