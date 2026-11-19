@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Integer> {
 
@@ -17,4 +19,6 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
     Page<Product> findFilteredProducts(@Param("category") String category,
                                        @Param("subcategory") String subcategory,
                                        Pageable pageable);
+
+    List<Product> findByIsDeletedFalseAndIsActiveTrueAndStockQuantityGreaterThanOrderByProductIdAsc(int minStock);
 }

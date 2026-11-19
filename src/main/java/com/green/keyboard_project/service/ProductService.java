@@ -64,9 +64,17 @@ public class ProductService {
                 : productImageRepository.findByProduct_ProductIdInOrderByDisplayOrderAsc(productIds)
                         .stream()
                         .collect(Collectors.groupingBy(img -> img.getProduct().getProductId()));
+        Map<Integer, ProductSpec> specsByProductId = productIds.isEmpty()
+                ? Collections.emptyMap()
+                : productSpecRepository.findAllById(productIds).stream()
+                        .collect(Collectors.toMap(ProductSpec::getProductId, spec -> spec));
 
         List<ProductResponseDto> content = products.stream()
-                .map(p -> toDto(p, imagesByProductId.getOrDefault(p.getProductId(), Collections.emptyList())))
+                .map(p -> toDto(
+                        p,
+                        imagesByProductId.getOrDefault(p.getProductId(), Collections.emptyList()),
+                        specsByProductId.get(p.getProductId())
+                ))
                 .collect(Collectors.toList());
 
         return ProductListResponseDto.builder()
@@ -83,11 +91,11 @@ public class ProductService {
                 .filter(p -> !p.isDeleted() && p.isActive() && p.getStockQuantity() > 0)
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다. (ID: " + productId + ")"));
         List<ProductImage> galleryEntities = productImageRepository.findByProduct_ProductIdOrderByDisplayOrderAsc(productId);
-        return toDto(product, galleryEntities);
+        ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
+        return toDto(product, galleryEntities, spec);
     }
 
-    private ProductResponseDto toDto(Product p, List<ProductImage> galleryEntities) {
-        ProductSpec spec = productSpecRepository.findById(p.getProductId()).orElse(null);
+    private ProductResponseDto toDto(Product p, List<ProductImage> galleryEntities, ProductSpec spec) {
 
         String parentId = "";
         if (p.getCategory() != null) {
@@ -172,7 +180,7 @@ public class ProductService {
                 .build();
     }
 
-    private List<Integer> parseSupportPins(String rawPins) {
+    public static List<Integer> parseSupportPins(String rawPins) {
         if (rawPins == null || rawPins.isBlank()) {
             return Collections.emptyList();
         }
