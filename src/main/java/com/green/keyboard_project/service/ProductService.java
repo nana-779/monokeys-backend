@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 @Service
@@ -257,7 +258,7 @@ public class ProductService {
             wishlistByCategory.put((String) row[0], ((Number) row[1]).longValue());
         }
 
-        record RankedSubcategory(String name, String parentId, long score, long productCount) {}
+        record RankedSubcategory(String name, String parentId, long engagement, long score, long productCount) {}
 
         List<RankedSubcategory> ranked = metrics.stream()
                 .map(row -> {
@@ -267,8 +268,9 @@ public class ProductService {
                     long productCount = ((Number) row[3]).longValue();
                     long orderCount = orderByCategory.getOrDefault(catId, 0L);
                     long wishlistCount = wishlistByCategory.getOrDefault(catId, 0L);
-                    long score = orderCount * 3L + wishlistCount * 2L + productCount;
-                    return new RankedSubcategory(catName, parentId, score, productCount);
+                    long engagement = orderCount * 3L + wishlistCount * 2L;
+                    long score = engagement + productCount;
+                    return new RankedSubcategory(catName, parentId, engagement, score, productCount);
                 })
                 .sorted((a, b) -> {
                     int byScore = Long.compare(b.score(), a.score());
@@ -276,17 +278,34 @@ public class ProductService {
                 })
                 .toList();
 
-        // 대분류(하드웨어 파트군)별로 한 번씩 번갈아 담아 특정 카테고리에 치우치지 않도록 구성
+        List<String> result = new ArrayList<>();
+        // 실제 주문/찜 반응이 있는 최상위 카테고리는 1순위로 고정 노출하고 나머지는 매 요청 셔플
+        RankedSubcategory topEngaged = ranked.stream()
+                .filter(item -> item.engagement() > 0)
+                .findFirst()
+                .orElse(null);
+        if (topEngaged != null) {
+            result.add(topEngaged.name());
+        }
+
+        // 대분류별로 활성 후보를 모은 뒤 요청마다 버킷 내부 & 대분류 순서를 섞어 새로고침 시마다 다른 조합을 제공
         Map<String, List<RankedSubcategory>> buckets = new LinkedHashMap<>();
         for (RankedSubcategory item : ranked) {
+            if (topEngaged != null && item.name().equals(topEngaged.name())) continue;
             buckets.computeIfAbsent(item.parentId(), k -> new ArrayList<>()).add(item);
         }
 
-        List<String> result = new ArrayList<>();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<List<RankedSubcategory>> bucketList = new ArrayList<>(buckets.values());
+        for (List<RankedSubcategory> bucket : bucketList) {
+            Collections.shuffle(bucket, random);
+        }
+        Collections.shuffle(bucketList, random);
+
         int round = 0;
         while (result.size() < safeLimit) {
             boolean addedInRound = false;
-            for (List<RankedSubcategory> bucket : buckets.values()) {
+            for (List<RankedSubcategory> bucket : bucketList) {
                 if (round < bucket.size()) {
                     String name = bucket.get(round).name();
                     if (!result.contains(name)) {

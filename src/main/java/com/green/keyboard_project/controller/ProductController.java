@@ -5,6 +5,7 @@ import com.green.keyboard_project.dto.product.ProductListResponseDto;
 import com.green.keyboard_project.dto.product.ProductResponseDto;
 import com.green.keyboard_project.service.ProductService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,7 +22,9 @@ public class ProductController {
     public ResponseEntity<ApiResponse<List<String>>> getSearchSuggestions(
             @RequestParam(name = "limit", defaultValue = "6") int limit
     ) {
-        return ResponseEntity.ok(ApiResponse.ok(productService.getSearchSuggestions(limit)));
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(ApiResponse.ok(productService.getSearchSuggestions(limit)));
     }
 
     @GetMapping
