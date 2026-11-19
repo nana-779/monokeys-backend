@@ -74,7 +74,7 @@ public class AdminProductService {
     @Transactional(readOnly = true)
     public ProductResponse getProduct(int productId) {
         Product product = productRepository.findById(productId)
-                .filter(existing -> !existing.isDeleted())
+                .filter(existing -> existing.isDeleted())
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
         ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
         return ProductResponse.from(product, spec);
