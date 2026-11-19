@@ -63,6 +63,7 @@ public class AdminProductService {
     @Transactional(readOnly = true)
     public List<ProductResponse> getAllProducts() {
         return productRepository.findAll().stream()
+                .filter(product -> !product.isDeleted())
                 .map(product -> ProductResponse.from(
                         product,
                         productSpecRepository.findById(product.getProductId()).orElse(null)))
@@ -73,25 +74,32 @@ public class AdminProductService {
     @Transactional(readOnly = true)
     public ProductResponse getProduct(int productId) {
         Product product = productRepository.findById(productId)
+                .filter(existing -> !existing.isDeleted())
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
         ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
         return ProductResponse.from(product, spec);
     }
 
-    // 관리자 상품 삭제
+    // 관리자 상품 삭제 (soft delete 적용)
     @Transactional
     public void deleteProduct(int productId) {
         Product product = productRepository.findById(productId)
+                .filter(existing -> !existing.isDeleted())
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
+
+        LocalDateTime now = LocalDateTime.now();
         product.setActive(false);
-        product.setUpdatedAt(LocalDateTime.now());
+        product.setDeleted(true);
+        product.setDeletedAt(now);
+        product.setUpdatedAt(now);
     }
 
     // 관리자 상품 수정
-    // 전달된 항목만 수정하고, 요청에서 빠진 항목은 기존 값을 유지합니다.
+    // 전달된 항목만 수정하고, 요청에서 빠진 항목은 기존 값을 유지
     @Transactional
     public ProductResponse updateProduct(int productId, UpdateProductRequest request, String imageUrl) {
         Product product = productRepository.findById(productId)
+                .filter(existing -> !existing.isDeleted())
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"));
 
         String previousParentId = parentCategoryId(product.getCategory());
@@ -133,26 +141,12 @@ public class AdminProductService {
     @Transactional(readOnly = true)
     public String getThumbnailUrl(int productId) {
         return productRepository.findById(productId)
+                .filter(product -> !product.isDeleted())
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"))
                 .getThumbnailUrl();
     }
 
-    // 판매중인 상품 조회
-    @Transactional(readOnly = true)
-    public List<ProductResponse> getActiveProducts() {
-        return productRepository.findAll().stream().filter(Product::isActive)
-                .map(product -> ProductResponse.from(product, productSpecRepository.findById(product.getProductId()).orElse(null)))
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public ProductResponse getActiveProduct(int productId) {
-        Product product = productRepository.findById(productId)
-                .filter(Product::isActive)
-                .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다."));
-        return ProductResponse.from(product, productSpecRepository.findById(productId).orElse(null));
-    }
-
+    // 카테고리 보조 메서드
     private Category findSubcategory(String categoryId) {
         return categoryRepository.findById(categoryId)
                 .filter(category -> category.getParent() != null && category.getParent().getParent() == null)
