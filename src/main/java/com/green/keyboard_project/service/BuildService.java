@@ -22,6 +22,8 @@ import com.green.keyboard_project.repository.ManualBuildRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.ProductSpecRepository;
 import com.green.keyboard_project.repository.UserRepository;
+import com.green.keyboard_project.repository.cart.CartItemRepository;
+import com.green.keyboard_project.repository.orders.OrderItemRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
