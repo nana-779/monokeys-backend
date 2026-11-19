@@ -42,5 +42,6 @@ out/
 ### Sensitive Information / DB Secret ###
 **/application-secret.properties
 **/application-local.properties
+**/application.properties
 .env
 .env.*

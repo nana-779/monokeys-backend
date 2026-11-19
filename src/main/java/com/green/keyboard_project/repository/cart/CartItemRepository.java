@@ -1,4 +1,4 @@
-package com.green.keyboard_project.repository;
+package com.green.keyboard_project.repository.cart;
 
 import com.green.keyboard_project.entity.CartItem;
 import com.green.keyboard_project.entity.Product;
@@ -11,8 +11,13 @@ import java.util.Optional;
 
 @Repository
 public interface CartItemRepository extends JpaRepository<CartItem, Integer> {
-    Optional<CartItem> findByUserAndProduct(User user, Product product);
     List<CartItem> findByUser_UserId(int userId);
+
+    Optional<CartItem> findByUserAndProduct(User user, Product product);
+
+    boolean existsByManualBuild_ManualBuildId(int manualBuildId);
+
+    boolean existsByAutoBuild_AutoBuildId(int autoBuildId);
 
     void deleteByUser(User user);
 }
