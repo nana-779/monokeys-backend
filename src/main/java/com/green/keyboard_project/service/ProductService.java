@@ -41,6 +41,17 @@ public class ProductService {
     // ==================== [스토어프론트 조회 API - feature/products] ====================
 
     public ProductListResponseDto getProducts(String category, String subcategory, int page, int size) {
+        return getProducts(category, subcategory, null, null, page, size);
+    }
+
+    public ProductListResponseDto getProducts(
+            String category,
+            String subcategory,
+            String keyword,
+            String sort,
+            int page,
+            int size
+    ) {
         // category 호환 처리 (keyboards -> pcb)
         if ("keyboards".equalsIgnoreCase(category)) {
             category = "pcb";
@@ -50,10 +61,16 @@ public class ProductService {
             subcategory = "housing-plastic";
         }
 
-        Pageable pageable = PageRequest.of(Math.max(0, page), Math.max(1, size), Sort.by(Sort.Direction.ASC, "productId"));
+        String normalizedKeyword = normalizeSearchKeyword(keyword);
+        Pageable pageable = PageRequest.of(
+                Math.max(0, page),
+                Math.max(1, size),
+                resolveProductSort(sort)
+        );
         Page<Product> productPage = productRepository.findFilteredProducts(
                 (category != null && !category.isBlank()) ? category.trim() : null,
                 (subcategory != null && !subcategory.isBlank()) ? subcategory.trim() : null,
+                normalizedKeyword,
                 pageable
         );
 
@@ -188,5 +205,32 @@ public class ProductService {
         if (rawPins.contains("3")) pins.add(3);
         if (rawPins.contains("5")) pins.add(5);
         return pins;
+    }
+
+    private String normalizeSearchKeyword(String keyword) {
+        if (keyword == null || keyword.isBlank()) {
+            return null;
+        }
+        String trimmed = keyword.trim();
+        if (trimmed.length() > 100) {
+            trimmed = trimmed.substring(0, 100);
+        }
+        return trimmed
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+    }
+
+    private Sort resolveProductSort(String sort) {
+        if (sort == null) {
+            return Sort.by(Sort.Direction.ASC, "productId");
+        }
+        return switch (sort.trim().toLowerCase()) {
+            case "price_asc" -> Sort.by(Sort.Order.asc("basePrice"), Sort.Order.asc("productId"));
+            case "price_desc" -> Sort.by(Sort.Order.desc("basePrice"), Sort.Order.asc("productId"));
+            case "latest" -> Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("productId"));
+            case "name_asc" -> Sort.by(Sort.Order.asc("name"), Sort.Order.asc("productId"));
+            default -> Sort.by(Sort.Direction.ASC, "productId");
+        };
     }
 }

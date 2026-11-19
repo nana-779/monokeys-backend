@@ -17,7 +17,7 @@ import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
 import com.green.keyboard_project.repository.AutoBuildItemRepository;
 import com.green.keyboard_project.repository.AutoBuildRepository;
-import com.green.keyboard_project.repository.CartItemRepository;
+import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.ManualBuildItemRepository;
 import com.green.keyboard_project.repository.ManualBuildRepository;
 import com.green.keyboard_project.repository.OrderItemRepository;

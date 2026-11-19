@@ -19,10 +19,12 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductListResponseDto>> getProducts(
             @RequestParam(name = "category", required = false) String category,
             @RequestParam(name = "subcategory", required = false) String subcategory,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "sort", required = false) String sort,
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "16") int size
     ) {
-        ProductListResponseDto response = productService.getProducts(category, subcategory, page, size);
+        ProductListResponseDto response = productService.getProducts(category, subcategory, keyword, sort, page, size);
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 

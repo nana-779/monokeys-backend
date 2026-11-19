@@ -13,11 +13,27 @@ import java.util.List;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Integer> {
 
-    @Query("SELECT p FROM Product p WHERE p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0 AND " +
-           "(:category IS NULL OR :category = 'all' OR p.category.categoryId = :category OR (p.category.parent IS NOT NULL AND p.category.parent.categoryId = :category)) AND " +
-           "(:subcategory IS NULL OR p.category.categoryId = :subcategory)")
+    @Query("SELECT p FROM Product p " +
+           "LEFT JOIN p.category c " +
+           "LEFT JOIN c.parent cp " +
+           "WHERE p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0 AND " +
+           "(:category IS NULL OR :category = 'all' OR c.categoryId = :category OR cp.categoryId = :category) AND " +
+           "(:subcategory IS NULL OR c.categoryId = :subcategory) AND " +
+           "(:keyword IS NULL OR (" +
+           "  LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "  LOWER(COALESCE(p.description, '')) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "  LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "  LOWER(COALESCE(cp.name, '')) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "  EXISTS (SELECT 1 FROM ProductSpec ps WHERE ps.productId = p.productId AND (" +
+           "    LOWER(COALESCE(ps.layout, '')) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "    LOWER(COALESCE(ps.housingMaterial, '')) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "    LOWER(COALESCE(ps.keycapMaterial, '')) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!' OR " +
+           "    LOWER(COALESCE(ps.switchType, '')) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '!'" +
+           "  ))" +
+           "))")
     Page<Product> findFilteredProducts(@Param("category") String category,
                                        @Param("subcategory") String subcategory,
+                                       @Param("keyword") String keyword,
                                        Pageable pageable);
 
     List<Product> findByIsDeletedFalseAndIsActiveTrueAndStockQuantityGreaterThanOrderByProductIdAsc(int minStock);
