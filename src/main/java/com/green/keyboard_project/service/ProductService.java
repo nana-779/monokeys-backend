@@ -13,19 +13,28 @@ import com.green.keyboard_project.repository.CategoryRepository;
 import com.green.keyboard_project.repository.ProductImageRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.ProductSpecRepository;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,6 +50,17 @@ public class ProductService {
     // ==================== [스토어프론트 조회 API - feature/products] ====================
 
     public ProductListResponseDto getProducts(String category, String subcategory, int page, int size) {
+        return getProducts(category, subcategory, null, null, page, size);
+    }
+
+    public ProductListResponseDto getProducts(
+            String category,
+            String subcategory,
+            String keyword,
+            String sort,
+            int page,
+            int size
+    ) {
         // category 호환 처리 (keyboards -> pcb)
         if ("keyboards".equalsIgnoreCase(category)) {
             category = "pcb";
@@ -50,10 +70,18 @@ public class ProductService {
             subcategory = "housing-plastic";
         }
 
-        Pageable pageable = PageRequest.of(Math.max(0, page), Math.max(1, size), Sort.by(Sort.Direction.ASC, "productId"));
-        Page<Product> productPage = productRepository.findFilteredProducts(
-                (category != null && !category.isBlank()) ? category.trim() : null,
-                (subcategory != null && !subcategory.isBlank()) ? subcategory.trim() : null,
+        String normalizedCategory = (category != null && !category.isBlank()) ? category.trim() : null;
+        String normalizedSubcategory = (subcategory != null && !subcategory.isBlank()) ? subcategory.trim() : null;
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+
+        Pageable pageable = PageRequest.of(
+                safePage,
+                safeSize,
+                resolveProductSort(sort)
+        );
+        Page<Product> productPage = productRepository.findAll(
+                buildProductSearchSpec(normalizedCategory, normalizedSubcategory, keyword),
                 pageable
         );
 
@@ -188,5 +216,174 @@ public class ProductService {
         if (rawPins.contains("3")) pins.add(3);
         if (rawPins.contains("5")) pins.add(5);
         return pins;
+    }
+
+    private Specification<Product> buildProductSearchSpec(String category, String subcategory, String keyword) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isFalse(root.get("isDeleted")));
+            predicates.add(cb.isTrue(root.get("isActive")));
+            predicates.add(cb.greaterThan(root.get("stockQuantity"), 0));
+
+            Join<Product, Category> categoryJoin = root.join("category", JoinType.LEFT);
+            Join<Category, Category> parentJoin = categoryJoin.join("parent", JoinType.LEFT);
+
+            if (category != null && !"all".equalsIgnoreCase(category)) {
+                predicates.add(cb.or(
+                        cb.equal(categoryJoin.get("categoryId"), category),
+                        cb.equal(parentJoin.get("categoryId"), category)
+                ));
+            }
+            if (subcategory != null) {
+                predicates.add(cb.equal(categoryJoin.get("categoryId"), subcategory));
+            }
+
+            List<String> tokens = extractSearchTokens(keyword);
+            for (String token : tokens) {
+                String pattern = "%" + token.toLowerCase() + "%";
+                Subquery<Integer> specSubquery = query.subquery(Integer.class);
+                Root<ProductSpec> specRoot = specSubquery.from(ProductSpec.class);
+                specSubquery.select(cb.literal(1)).where(
+                        cb.equal(specRoot.get("productId"), root.get("productId")),
+                        cb.or(
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("layout"), "")), pattern, '!'),
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("housingMaterial"), "")), pattern, '!'),
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("keycapMaterial"), "")), pattern, '!'),
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("switchType"), "")), pattern, '!')
+                        )
+                );
+
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("name")), pattern, '!'),
+                        cb.like(cb.lower(cb.coalesce(root.get("description"), "")), pattern, '!'),
+                        cb.like(cb.lower(cb.coalesce(categoryJoin.get("name"), "")), pattern, '!'),
+                        cb.like(cb.lower(cb.coalesce(parentJoin.get("name"), "")), pattern, '!'),
+                        cb.exists(specSubquery)
+                ));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+    }
+
+    private List<String> extractSearchTokens(String keyword) {
+        if (keyword == null || keyword.isBlank()) {
+            return Collections.emptyList();
+        }
+        String trimmed = keyword.trim();
+        if (trimmed.length() > 100) {
+            trimmed = trimmed.substring(0, 100);
+        }
+        String[] parts = trimmed.split("\\s+");
+        List<String> tokens = new ArrayList<>();
+        for (String part : parts) {
+            if (part.isBlank()) continue;
+            String escaped = part
+                    .replace("!", "!!")
+                    .replace("%", "!%")
+                    .replace("_", "!_");
+            if (!tokens.contains(escaped)) {
+                tokens.add(escaped);
+                if (tokens.size() >= 5) break;
+            }
+        }
+        return tokens;
+    }
+
+    private Sort resolveProductSort(String sort) {
+        if (sort == null) {
+            return Sort.by(Sort.Direction.ASC, "productId");
+        }
+        return switch (sort.trim().toLowerCase()) {
+            case "price_asc" -> Sort.by(Sort.Order.asc("basePrice"), Sort.Order.asc("productId"));
+            case "price_desc" -> Sort.by(Sort.Order.desc("basePrice"), Sort.Order.asc("productId"));
+            case "latest" -> Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("productId"));
+            case "name_asc" -> Sort.by(Sort.Order.asc("name"), Sort.Order.asc("productId"));
+            default -> Sort.by(Sort.Direction.ASC, "productId");
+        };
+    }
+
+    /**
+     * 판매·재고가 있는 실제 카테고리, 찜(wishlist), 주문(order_item) 빈도를 조합해
+     * 대분류별로 고르게 동적 추천 검색어를 반환합니다.
+     */
+    public List<String> getSearchSuggestions(int limit) {
+        int safeLimit = Math.min(10, Math.max(1, limit));
+        List<Object[]> metrics = productRepository.findActiveSubcategoryMetrics();
+        if (metrics.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, Long> orderByCategory = new HashMap<>();
+        for (Object[] row : productRepository.findOrderQuantityByActiveCategory()) {
+            orderByCategory.put((String) row[0], ((Number) row[1]).longValue());
+        }
+
+        Map<String, Long> wishlistByCategory = new HashMap<>();
+        for (Object[] row : productRepository.findWishlistCountByActiveCategory()) {
+            wishlistByCategory.put((String) row[0], ((Number) row[1]).longValue());
+        }
+
+        record RankedSubcategory(String name, String parentId, long engagement, long score, long productCount) {}
+
+        List<RankedSubcategory> ranked = metrics.stream()
+                .map(row -> {
+                    String catId = (String) row[0];
+                    String catName = (String) row[1];
+                    String parentId = (String) row[2];
+                    long productCount = ((Number) row[3]).longValue();
+                    long orderCount = orderByCategory.getOrDefault(catId, 0L);
+                    long wishlistCount = wishlistByCategory.getOrDefault(catId, 0L);
+                    long engagement = orderCount * 3L + wishlistCount * 2L;
+                    long score = engagement + productCount;
+                    return new RankedSubcategory(catName, parentId, engagement, score, productCount);
+                })
+                .sorted((a, b) -> {
+                    int byScore = Long.compare(b.score(), a.score());
+                    return byScore != 0 ? byScore : Long.compare(b.productCount(), a.productCount());
+                })
+                .toList();
+
+        List<String> result = new ArrayList<>();
+        // 실제 주문/찜 반응이 있는 최상위 카테고리는 1순위로 고정 노출하고 나머지는 매 요청 셔플
+        RankedSubcategory topEngaged = ranked.stream()
+                .filter(item -> item.engagement() > 0)
+                .findFirst()
+                .orElse(null);
+        if (topEngaged != null) {
+            result.add(topEngaged.name());
+        }
+
+        // 대분류별로 활성 후보를 모은 뒤 요청마다 버킷 내부 & 대분류 순서를 섞어 새로고침 시마다 다른 조합을 제공
+        Map<String, List<RankedSubcategory>> buckets = new LinkedHashMap<>();
+        for (RankedSubcategory item : ranked) {
+            if (topEngaged != null && item.name().equals(topEngaged.name())) continue;
+            buckets.computeIfAbsent(item.parentId(), k -> new ArrayList<>()).add(item);
+        }
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<List<RankedSubcategory>> bucketList = new ArrayList<>(buckets.values());
+        for (List<RankedSubcategory> bucket : bucketList) {
+            Collections.shuffle(bucket, random);
+        }
+        Collections.shuffle(bucketList, random);
+
+        int round = 0;
+        while (result.size() < safeLimit) {
+            boolean addedInRound = false;
+            for (List<RankedSubcategory> bucket : bucketList) {
+                if (round < bucket.size()) {
+                    String name = bucket.get(round).name();
+                    if (!result.contains(name)) {
+                        result.add(name);
+                        if (result.size() >= safeLimit) break;
+                    }
+                    addedInRound = true;
+                }
+            }
+            if (!addedInRound) break;
+            round++;
+        }
+        return result;
     }
 }

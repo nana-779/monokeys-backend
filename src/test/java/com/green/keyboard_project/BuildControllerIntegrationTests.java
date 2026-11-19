@@ -9,6 +9,7 @@ import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.ProductSpec;
 import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.repository.AutoBuildRepository;
+import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.CategoryRepository;
 import com.green.keyboard_project.repository.ManualBuildRepository;
 import com.green.keyboard_project.repository.ProductRepository;
