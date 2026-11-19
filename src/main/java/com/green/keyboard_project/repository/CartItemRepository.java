@@ -6,9 +6,13 @@ import com.green.keyboard_project.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
 public interface CartItemRepository extends JpaRepository<CartItem, Integer> {
     Optional<CartItem> findByUserAndProduct(User user, Product product);
+    List<CartItem> findByUser_UserId(int userId);
+
+    void deleteByUser(User user);
 }

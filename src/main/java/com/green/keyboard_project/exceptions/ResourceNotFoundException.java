@@ -1,7 +1,7 @@
 package com.green.keyboard_project.exceptions;
 
-public class ResourceNotFountException extends RuntimeException {
-    public ResourceNotFountException(String message) {
+public class ResourceNotFoundException extends RuntimeException {
+    public ResourceNotFoundException(String message) {
         super(message);
     }
 }
