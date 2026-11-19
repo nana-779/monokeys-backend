@@ -1,4 +1,4 @@
-package com.green.keyboard_project.repository;
+package com.green.keyboard_project.repository.cart;
 
 import com.green.keyboard_project.entity.CartItem;
 import com.green.keyboard_project.entity.Product;
