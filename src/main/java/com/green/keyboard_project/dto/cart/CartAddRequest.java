@@ -15,4 +15,5 @@ import lombok.Setter;
 public class CartAddRequest {
     private Integer productId;
     private Integer quantity;
+    private String customDesignData;
 }
