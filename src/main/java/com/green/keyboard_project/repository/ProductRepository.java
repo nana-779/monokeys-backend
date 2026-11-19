@@ -37,4 +37,26 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
                                        Pageable pageable);
 
     List<Product> findByIsDeletedFalseAndIsActiveTrueAndStockQuantityGreaterThanOrderByProductIdAsc(int minStock);
+
+    @Query("SELECT c.categoryId, c.name, cp.categoryId, COUNT(p) FROM Product p " +
+           "JOIN p.category c " +
+           "JOIN c.parent cp " +
+           "WHERE p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0 " +
+           "GROUP BY c.categoryId, c.name, cp.categoryId, c.displayOrder " +
+           "ORDER BY COUNT(p) DESC, c.displayOrder ASC")
+    List<Object[]> findActiveSubcategoryMetrics();
+
+    @Query("SELECT c.categoryId, COALESCE(SUM(oi.quantity), 0) FROM OrderItem oi " +
+           "JOIN oi.product p " +
+           "JOIN p.category c " +
+           "WHERE p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0 AND c.parent IS NOT NULL " +
+           "GROUP BY c.categoryId")
+    List<Object[]> findOrderQuantityByActiveCategory();
+
+    @Query("SELECT c.categoryId, COUNT(w) FROM Wishlist w " +
+           "JOIN w.product p " +
+           "JOIN p.category c " +
+           "WHERE p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0 AND c.parent IS NOT NULL " +
+           "GROUP BY c.categoryId")
+    List<Object[]> findWishlistCountByActiveCategory();
 }

@@ -24,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -232,5 +234,71 @@ public class ProductService {
             case "name_asc" -> Sort.by(Sort.Order.asc("name"), Sort.Order.asc("productId"));
             default -> Sort.by(Sort.Direction.ASC, "productId");
         };
+    }
+
+    /**
+     * 판매·재고가 있는 실제 카테고리, 찜(wishlist), 주문(order_item) 빈도를 조합해
+     * 대분류별로 고르게 동적 추천 검색어를 반환합니다.
+     */
+    public List<String> getSearchSuggestions(int limit) {
+        int safeLimit = Math.min(10, Math.max(1, limit));
+        List<Object[]> metrics = productRepository.findActiveSubcategoryMetrics();
+        if (metrics.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, Long> orderByCategory = new HashMap<>();
+        for (Object[] row : productRepository.findOrderQuantityByActiveCategory()) {
+            orderByCategory.put((String) row[0], ((Number) row[1]).longValue());
+        }
+
+        Map<String, Long> wishlistByCategory = new HashMap<>();
+        for (Object[] row : productRepository.findWishlistCountByActiveCategory()) {
+            wishlistByCategory.put((String) row[0], ((Number) row[1]).longValue());
+        }
+
+        record RankedSubcategory(String name, String parentId, long score, long productCount) {}
+
+        List<RankedSubcategory> ranked = metrics.stream()
+                .map(row -> {
+                    String catId = (String) row[0];
+                    String catName = (String) row[1];
+                    String parentId = (String) row[2];
+                    long productCount = ((Number) row[3]).longValue();
+                    long orderCount = orderByCategory.getOrDefault(catId, 0L);
+                    long wishlistCount = wishlistByCategory.getOrDefault(catId, 0L);
+                    long score = orderCount * 3L + wishlistCount * 2L + productCount;
+                    return new RankedSubcategory(catName, parentId, score, productCount);
+                })
+                .sorted((a, b) -> {
+                    int byScore = Long.compare(b.score(), a.score());
+                    return byScore != 0 ? byScore : Long.compare(b.productCount(), a.productCount());
+                })
+                .toList();
+
+        // 대분류(하드웨어 파트군)별로 한 번씩 번갈아 담아 특정 카테고리에 치우치지 않도록 구성
+        Map<String, List<RankedSubcategory>> buckets = new LinkedHashMap<>();
+        for (RankedSubcategory item : ranked) {
+            buckets.computeIfAbsent(item.parentId(), k -> new ArrayList<>()).add(item);
+        }
+
+        List<String> result = new ArrayList<>();
+        int round = 0;
+        while (result.size() < safeLimit) {
+            boolean addedInRound = false;
+            for (List<RankedSubcategory> bucket : buckets.values()) {
+                if (round < bucket.size()) {
+                    String name = bucket.get(round).name();
+                    if (!result.contains(name)) {
+                        result.add(name);
+                        if (result.size() >= safeLimit) break;
+                    }
+                    addedInRound = true;
+                }
+            }
+            if (!addedInRound) break;
+            round++;
+        }
+        return result;
     }
 }
