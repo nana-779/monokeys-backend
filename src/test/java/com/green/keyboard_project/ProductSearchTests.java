@@ -81,6 +81,22 @@ class ProductSearchTests {
         mvc.perform(get("/api/products").param("keyword", "스위치"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1));
+
+        // 다중 단어 AND 검색: 필드/단어 순서와 무관하게 모든 키워드 토큰 포함 시 매칭
+        mvc.perform(get("/api/products").param("keyword", "스위치 oil"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].name").value("Gateron Oil King 리니어"));
+
+        mvc.perform(get("/api/products").param("keyword", "PBT 65%"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].name").value("MONO PBT Minimal Set"));
+
+        // size 상한(100) 방어 검증
+        mvc.perform(get("/api/products").param("size", "9999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.pageSize").value(100));
     }
 
     @Test

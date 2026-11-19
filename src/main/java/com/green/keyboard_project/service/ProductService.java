@@ -13,11 +13,17 @@ import com.green.keyboard_project.repository.CategoryRepository;
 import com.green.keyboard_project.repository.ProductImageRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.ProductSpecRepository;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,16 +70,18 @@ public class ProductService {
             subcategory = "housing-plastic";
         }
 
-        String normalizedKeyword = normalizeSearchKeyword(keyword);
+        String normalizedCategory = (category != null && !category.isBlank()) ? category.trim() : null;
+        String normalizedSubcategory = (subcategory != null && !subcategory.isBlank()) ? subcategory.trim() : null;
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+
         Pageable pageable = PageRequest.of(
-                Math.max(0, page),
-                Math.max(1, size),
+                safePage,
+                safeSize,
                 resolveProductSort(sort)
         );
-        Page<Product> productPage = productRepository.findFilteredProducts(
-                (category != null && !category.isBlank()) ? category.trim() : null,
-                (subcategory != null && !subcategory.isBlank()) ? subcategory.trim() : null,
-                normalizedKeyword,
+        Page<Product> productPage = productRepository.findAll(
+                buildProductSearchSpec(normalizedCategory, normalizedSubcategory, keyword),
                 pageable
         );
 
@@ -210,18 +218,76 @@ public class ProductService {
         return pins;
     }
 
-    private String normalizeSearchKeyword(String keyword) {
+    private Specification<Product> buildProductSearchSpec(String category, String subcategory, String keyword) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isFalse(root.get("isDeleted")));
+            predicates.add(cb.isTrue(root.get("isActive")));
+            predicates.add(cb.greaterThan(root.get("stockQuantity"), 0));
+
+            Join<Product, Category> categoryJoin = root.join("category", JoinType.LEFT);
+            Join<Category, Category> parentJoin = categoryJoin.join("parent", JoinType.LEFT);
+
+            if (category != null && !"all".equalsIgnoreCase(category)) {
+                predicates.add(cb.or(
+                        cb.equal(categoryJoin.get("categoryId"), category),
+                        cb.equal(parentJoin.get("categoryId"), category)
+                ));
+            }
+            if (subcategory != null) {
+                predicates.add(cb.equal(categoryJoin.get("categoryId"), subcategory));
+            }
+
+            List<String> tokens = extractSearchTokens(keyword);
+            for (String token : tokens) {
+                String pattern = "%" + token.toLowerCase() + "%";
+                Subquery<Integer> specSubquery = query.subquery(Integer.class);
+                Root<ProductSpec> specRoot = specSubquery.from(ProductSpec.class);
+                specSubquery.select(cb.literal(1)).where(
+                        cb.equal(specRoot.get("productId"), root.get("productId")),
+                        cb.or(
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("layout"), "")), pattern, '!'),
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("housingMaterial"), "")), pattern, '!'),
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("keycapMaterial"), "")), pattern, '!'),
+                                cb.like(cb.lower(cb.coalesce(specRoot.get("switchType"), "")), pattern, '!')
+                        )
+                );
+
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("name")), pattern, '!'),
+                        cb.like(cb.lower(cb.coalesce(root.get("description"), "")), pattern, '!'),
+                        cb.like(cb.lower(cb.coalesce(categoryJoin.get("name"), "")), pattern, '!'),
+                        cb.like(cb.lower(cb.coalesce(parentJoin.get("name"), "")), pattern, '!'),
+                        cb.exists(specSubquery)
+                ));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+    }
+
+    private List<String> extractSearchTokens(String keyword) {
         if (keyword == null || keyword.isBlank()) {
-            return null;
+            return Collections.emptyList();
         }
         String trimmed = keyword.trim();
         if (trimmed.length() > 100) {
             trimmed = trimmed.substring(0, 100);
         }
-        return trimmed
-                .replace("!", "!!")
-                .replace("%", "!%")
-                .replace("_", "!_");
+        String[] parts = trimmed.split("\\s+");
+        List<String> tokens = new ArrayList<>();
+        for (String part : parts) {
+            if (part.isBlank()) continue;
+            String escaped = part
+                    .replace("!", "!!")
+                    .replace("%", "!%")
+                    .replace("_", "!_");
+            if (!tokens.contains(escaped)) {
+                tokens.add(escaped);
+                if (tokens.size() >= 5) break;
+            }
+        }
+        return tokens;
     }
 
     private Sort resolveProductSort(String sort) {
