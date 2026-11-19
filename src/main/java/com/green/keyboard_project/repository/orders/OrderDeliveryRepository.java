@@ -1,4 +1,4 @@
-package com.green.keyboard_project.repository;
+package com.green.keyboard_project.repository.orders;
 
 import com.green.keyboard_project.entity.OrderDelivery;
 import org.springframework.data.jpa.repository.JpaRepository;
