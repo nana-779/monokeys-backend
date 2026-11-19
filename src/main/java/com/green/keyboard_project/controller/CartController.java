@@ -1,7 +1,9 @@
 package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.ApiResponse;
-import com.green.keyboard_project.dto.CartItemResponse;
+import com.green.keyboard_project.dto.cart.CartAddRequest;
+import com.green.keyboard_project.dto.cart.CartItemResponse;
+import com.green.keyboard_project.dto.cart.CartQuantityUpdateRequest;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
@@ -37,7 +39,7 @@ public class CartController {
     @PostMapping
     public ResponseEntity<ApiResponse<String>> addCartItem(
             @AuthenticationPrincipal Integer userId,
-            @RequestBody CartItemResponse request
+            @RequestBody CartAddRequest request
     ) {
         if (userId == null) {
             throw new UnauthenticatedException("로그인이 필요합니다.");
@@ -49,9 +51,7 @@ public class CartController {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
 
-        int productId = request.getProductId();
-        int quantity = request.getQuantity();
-        cartService.addCartItem(userId, productId, quantity);
+        cartService.addCartItem(userId, request.getProductId(), request.getQuantity());
         return ResponseEntity.ok(ApiResponse.ok("장바구니에 추가되었습니다."));
     }
 
@@ -62,13 +62,15 @@ public class CartController {
     public ResponseEntity<ApiResponse<String>> updateCartItemQuantity(
             @AuthenticationPrincipal Integer userId,
             @PathVariable int productId,
-            @RequestBody CartItemResponse request
+            @RequestBody CartQuantityUpdateRequest request
     ) {
         if (userId == null) {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
-        int quantity = request.getQuantity() != null ? request.getQuantity() : 1;
-        cartService.updateCartItemQuantity(userId, productId, quantity);
+        if (request.getQuantity() == null) {
+            throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+        }
+        cartService.updateCartItemQuantity(userId, productId, request.getQuantity());
         return ResponseEntity.ok(ApiResponse.ok("수량이 변경되었습니다."));
     }
 
