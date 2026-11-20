@@ -7,6 +7,7 @@ import com.green.keyboard_project.service.payment.TossCancellationGateway.Cancel
 import com.green.keyboard_project.service.payment.TossCancellationGateway.Failure;
 import com.green.keyboard_project.service.payment.TossCancellationGateway.Snapshot;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 /** 본인 결제의 취소를 조율합니다. 결제사 연결이 준비되기 전에는 조회와 유효성 검사까지만 실행합니다. */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OrderCancellationService {
     private final OrderCancellationStore store;
     private final ObjectProvider<TossCancellationGateway> gateways;
@@ -37,7 +39,8 @@ public class OrderCancellationService {
         try {
             before = gateway.lookup(target.paymentKey());
         } catch (Failure error) {
-            throw new PaymentConfirmationException(502, "PROVIDER_LOOKUP_FAILED", "Toss 결제 상태를 확인할 수 없습니다.");
+            recordIssue(target, null, error.code(), "LOOKUP_FAILED");
+            throw providerError(error);
         }
         if (!matchesPayment(target, before) || before.virtualAccount() || before.balance() != target.remaining()) {
             throw new PaymentConfirmationException(409, "PROVIDER_PAYMENT_CHANGED", "Toss 결제 잔액 또는 상태를 다시 확인해 주세요.");
@@ -56,13 +59,15 @@ public class OrderCancellationService {
                     request.refundReceiveAccount(), idempotencyKey);
             confirmed = findConfirmed(target, amount, markedReason, previousKeys, result);
         } catch (Failure failure) {
+            recordIssue(target, refundId, failure.code(), failure.uncertain() ? "PENDING_CONFIRMATION" : "REJECTED");
             if (!failure.uncertain()) {
                 try {
                     store.reject(target.paymentId(), refundId);
                 } catch (RuntimeException storageFailure) {
+                    recordIssue(target, refundId, "REFUND_WRITE_FAILED", "PENDING_CONFIRMATION");
                     return new Result(refundId, "PENDING_CONFIRMATION", amount);
                 }
-                throw new PaymentConfirmationException(422, "PROVIDER_CANCEL_REJECTED", failure.getMessage());
+                throw providerError(failure);
             }
             confirmed = null;
         }
@@ -71,7 +76,8 @@ public class OrderCancellationService {
         if (confirmed == null) {
             try {
                 confirmed = findConfirmed(target, amount, markedReason, previousKeys, gateway.lookup(target.paymentKey()));
-            } catch (Failure ignored) {
+            } catch (Failure failure) {
+                recordIssue(target, refundId, failure.code(), "PENDING_CONFIRMATION");
                 return new Result(refundId, "PENDING_CONFIRMATION", amount);
             }
         }
@@ -87,21 +93,40 @@ public class OrderCancellationService {
         try {
             confirmed = findConfirmed(pending.target(), pending.amount(), markedReason(pending.reason(), pending.refundId()),
                     Set.of(), gateway.lookup(pending.target().paymentKey()));
-        } catch (Failure ignored) {
+        } catch (Failure failure) {
+            recordIssue(pending.target(), pending.refundId(), failure.code(), "PENDING_CONFIRMATION");
             confirmed = null;
         }
         return persistOutcome(pending.target(), pending.refundId(), pending.amount(), confirmed);
     }
 
     private Result persistOutcome(Target target, int refundId, int amount, Cancellation confirmed) {
-        if (confirmed == null) return new Result(refundId, "PENDING_CONFIRMATION", amount);
+        if (confirmed == null) {
+            recordIssue(target, refundId, "REFUND_NOT_CONFIRMED", "PENDING_CONFIRMATION");
+            return new Result(refundId, "PENDING_CONFIRMATION", amount);
+        }
         try {
             store.complete(target.paymentId(), refundId, confirmed);
         } catch (RuntimeException storageFailure) {
             // PG가 취소됐어도 로컬 기록을 확정하지 못했다면 요청 행을 남겨 후속 대사를 기다립니다.
+            recordIssue(target, refundId, "REFUND_WRITE_FAILED", "PENDING_CONFIRMATION");
             return new Result(refundId, "PENDING_CONFIRMATION", amount);
         }
+        log.info("refund order={} request={} status=CANCELLATION_CONFIRMED", safeOrderNumber(target), refundId);
         return new Result(refundId, "CANCELLATION_CONFIRMED", amount);
+    }
+
+    private static PaymentConfirmationException providerError(Failure failure) {
+        return new PaymentConfirmationException(failure.status(), failure.code(), failure.getMessage());
+    }
+
+    // 로그 시각과 함께 내부 식별정보만 남기고 원본 예외, 결제 키, 사유, 계좌정보를 기록하지 않습니다.
+    private static void recordIssue(Target target, Integer refundId, String code, String state) {
+        log.warn("refund order={} request={} code={} status={}", safeOrderNumber(target), refundId, code, state);
+    }
+
+    private static String safeOrderNumber(Target target) {
+        return target.orderNumber().matches("[A-Za-z0-9_=-]{1,32}") ? target.orderNumber() : "[redacted]";
     }
 
     private TossCancellationGateway configuredGateway() {

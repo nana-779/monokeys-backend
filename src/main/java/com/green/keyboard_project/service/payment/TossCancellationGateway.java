@@ -24,13 +24,42 @@ public interface TossCancellationGateway {
 
     /** 결과 미확정은 DB 요청 상태를 보존해 중복 취소를 막습니다. */
     final class Failure extends RuntimeException {
-        private final boolean uncertain;
+        public enum Kind {
+            AUTHENTICATION(false, 502, "결제사 인증 설정을 확인해야 합니다."),
+            ACCESS_DENIED(false, 502, "결제사에서 취소 API 접근을 허용하지 않았습니다."),
+            PAYMENT_NOT_FOUND(true, 409, "결제사에서 결제를 찾을 수 없습니다."),
+            PAYMENT_STATE(false, 409, "현재 결제 상태에서는 취소할 수 없습니다."),
+            DEADLINE(false, 422, "결제수단의 취소 가능 기간이 지났습니다."),
+            PARTIAL_UNSUPPORTED(false, 422, "이 거래는 부분 취소가 불가능합니다."),
+            ACCOUNT_INVALID(false, 422, "환불계좌 정보를 확인해 주세요."),
+            REJECTED(false, 422, "결제사가 취소 요청을 거절했습니다."),
+            IN_PROGRESS(true, 502, "결제사의 기존 취소 결과를 확인해야 합니다."),
+            HTTP_4XX(true, 502, "결제사 요청 처리 결과를 확인할 수 없습니다."),
+            HTTP_5XX(true, 502, "결제사 서버 오류로 결과를 확인할 수 없습니다."),
+            NETWORK(true, 502, "결제사 연결 오류로 결과를 확인할 수 없습니다."),
+            TIMEOUT(true, 502, "결제사 응답이 지연되어 결과를 확인할 수 없습니다."),
+            INVALID_RESPONSE(true, 502, "결제사 응답을 확인할 수 없습니다.");
 
-        public Failure(boolean uncertain) {
-            super(uncertain ? "취소 결과를 확인할 수 없습니다." : "결제사가 취소 요청을 거절했습니다.");
-            this.uncertain = uncertain;
+            private final boolean uncertain;
+            private final int status;
+            private final String safeMessage;
+
+            Kind(boolean uncertain, int status, String safeMessage) {
+                this.uncertain = uncertain;
+                this.status = status;
+                this.safeMessage = safeMessage;
+            }
         }
 
-        public boolean uncertain() { return uncertain; }
+        private final Kind kind;
+
+        public Failure(Kind kind) {
+            super(kind.safeMessage);
+            this.kind = kind;
+        }
+
+        public boolean uncertain() { return kind.uncertain; }
+        public int status() { return kind.status; }
+        public String code() { return "TOSS_" + kind.name(); }
     }
 }

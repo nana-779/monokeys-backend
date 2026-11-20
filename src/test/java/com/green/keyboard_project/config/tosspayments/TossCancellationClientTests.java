@@ -12,6 +12,9 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
@@ -82,6 +85,48 @@ class TossCancellationClientTests {
                     assertThat(error.getMessage()).doesNotContain("provider raw message");
                 });
         assertThat(client.lookup("mock-key").status()).isEqualTo("CANCELED");
+        mockServer.verify();
+    }
+
+    @Test
+    void providerErrorsUseSafeCategoriesRatherThanRawMessages() {
+        assertProviderFailure(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED_KEY", "TOSS_AUTHENTICATION", false);
+        assertProviderFailure(HttpStatus.FORBIDDEN, "FORBIDDEN_REQUEST", "TOSS_ACCESS_DENIED", false);
+        assertProviderFailure(HttpStatus.NOT_FOUND, "NOT_FOUND_PAYMENT", "TOSS_PAYMENT_NOT_FOUND", true);
+        assertProviderFailure(HttpStatus.FORBIDDEN, "NOT_CANCELABLE_PAYMENT", "TOSS_PAYMENT_STATE", false);
+        assertProviderFailure(HttpStatus.FORBIDDEN, "EXCEED_MAX_REFUND_DUE", "TOSS_DEADLINE", false);
+        assertProviderFailure(HttpStatus.FORBIDDEN, "NOT_ALLOWED_PARTIAL_REFUND", "TOSS_PARTIAL_UNSUPPORTED", false);
+        assertProviderFailure(HttpStatus.BAD_REQUEST, "INVALID_REFUND_ACCOUNT_INFO", "TOSS_ACCOUNT_INVALID", false);
+        assertProviderFailure(HttpStatus.BAD_REQUEST, "PROVIDER_ERROR", "TOSS_HTTP_4XX", true);
+        assertProviderFailure(HttpStatus.INTERNAL_SERVER_ERROR, "PROVIDER_ERROR", "TOSS_HTTP_5XX", true);
+    }
+
+    @Test
+    void timeoutAndConnectionFailuresStayUncertain() {
+        mockServer.expect(requestTo(BASE)).andRespond(withException(new SocketTimeoutException("raw timeout detail")));
+        mockServer.expect(requestTo(BASE)).andRespond(withException(new ConnectException("raw connection detail")));
+        assertThatThrownBy(() -> client.lookup("mock-key"))
+                .isInstanceOfSatisfying(Failure.class, error -> {
+                    assertThat(error.code()).isEqualTo("TOSS_TIMEOUT");
+                    assertThat(error.uncertain()).isTrue();
+                    assertThat(error.getMessage()).doesNotContain("raw timeout detail");
+                });
+        assertThatThrownBy(() -> client.lookup("mock-key"))
+                .isInstanceOfSatisfying(Failure.class, error -> assertThat(error.code()).isEqualTo("TOSS_NETWORK"));
+        mockServer.verify();
+    }
+
+    private void assertProviderFailure(HttpStatus status, String code, String expectedCode, boolean uncertain) {
+        mockServer.reset();
+        mockServer.expect(requestTo(BASE + "/cancel")).andRespond(withStatus(status)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"code\":\"" + code + "\",\"message\":\"raw account 123456789\"}"));
+        assertThatThrownBy(() -> client.cancel("mock-key", "mock reason", null, null, "mock-operation"))
+                .isInstanceOfSatisfying(Failure.class, error -> {
+                    assertThat(error.code()).isEqualTo(expectedCode);
+                    assertThat(error.uncertain()).isEqualTo(uncertain);
+                    assertThat(error.getMessage()).doesNotContain("123456789");
+                });
         mockServer.verify();
     }
 }

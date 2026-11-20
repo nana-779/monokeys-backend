@@ -88,7 +88,7 @@ public class OrderCancellationStore {
         return refunds.saveAndFlush(refund).getRefundId();
     }
 
-    // 취소 거래가 검증된 경우에만 환불 행을 완료합니다. 주문·결제·배송·재고의 후속 처리는 팀 협의 범위입니다.
+    // 확인된 취소 거래와 결제 상태를 함께 저장합니다. 주문·배송·재고의 후속 처리는 팀 협의 범위입니다.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void complete(int paymentId, int refundId, TossCancellationGateway.Cancellation cancellation) {
         Refund refund = lockedRefund(paymentId, refundId);
@@ -99,9 +99,26 @@ public class OrderCancellationStore {
         if (refund.getStatus() == RefundStatusType.COMPLETED
                 && cancellation.transactionKey().equals(refund.getPgCancelTid())) return;
         requirePending(refund);
+        // 결제 행 잠금에 더해 DB의 거래 키 UNIQUE가 서로 다른 결제의 중복 저장도 막습니다.
+        if (refunds.existsByPgCancelTid(cancellation.transactionKey())) {
+            throw conflict("REFUND_TRANSACTION_DUPLICATE", "이미 기록된 취소 거래입니다.");
+        }
+        Payment payment = refund.getPayment();
+        int remaining = remainingBalance(payment.getPaidAmount(),
+                refunds.findByPayment_PaymentIdOrderByRequestedAtDesc(paymentId));
+        if (payment.getPaymentStatus() != PaymentStatusType.PAID
+                || cancellation.amount() <= 0 || cancellation.amount() > remaining) {
+            throw conflict("REFUND_STATE_CHANGED", "결제 상태 또는 남은 금액을 다시 확인해 주세요.");
+        }
+        LocalDateTime canceledAt = cancellation.canceledAt().atZoneSameInstant(KOREA).toLocalDateTime();
         refund.setPgCancelTid(cancellation.transactionKey());
-        refund.setRefundedAt(cancellation.canceledAt().atZoneSameInstant(KOREA).toLocalDateTime());
+        refund.setRefundedAt(canceledAt);
         refund.setStatus(RefundStatusType.COMPLETED);
+        // 부분 취소는 PAID를 유지하고 이력에서 잔액을 계산합니다. 잔액이 0인 경우에만 결제를 CANCELLED로 바꿉니다.
+        if (cancellation.amount() == remaining) {
+            payment.setPaymentStatus(PaymentStatusType.CANCELLED);
+            payment.setCancelledAt(canceledAt);
+        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

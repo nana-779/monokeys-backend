@@ -8,6 +8,7 @@ import com.green.keyboard_project.service.payment.OrderCancellationStore.Pending
 import com.green.keyboard_project.service.payment.OrderCancellationStore.Target;
 import com.green.keyboard_project.service.payment.TossCancellationGateway.Cancellation;
 import com.green.keyboard_project.service.payment.TossCancellationGateway.Failure;
+import com.green.keyboard_project.service.payment.TossCancellationGateway.Failure.Kind;
 import com.green.keyboard_project.service.payment.TossCancellationGateway.Snapshot;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
@@ -95,7 +96,7 @@ class OrderCancellationServiceTests {
         reserve(FULL);
         when(gateway.lookup("synthetic-key")).thenReturn(snapshot("DONE", 10_000, false))
                 .thenReturn(snapshot("CANCELED", 0, false, cancellation("another cancellation", 10_000)));
-        when(gateway.cancel("synthetic-key", MARKED_REASON, null, null, IDEMPOTENCY)).thenThrow(new Failure(true));
+        when(gateway.cancel("synthetic-key", MARKED_REASON, null, null, IDEMPOTENCY)).thenThrow(new Failure(Kind.TIMEOUT));
         assertThat(service.cancel("ORD-TEST", 7, FULL).status()).isEqualTo("PENDING_CONFIRMATION");
         verify(gateway, times(2)).lookup("synthetic-key");
         verify(gateway, times(1)).cancel(any(), any(), any(), any(), any());
@@ -127,7 +128,7 @@ class OrderCancellationServiceTests {
     @Test
     void definitiveRejectionMarksOnlyTheReservedRow() {
         reserve(FULL);
-        when(gateway.cancel("synthetic-key", MARKED_REASON, null, null, IDEMPOTENCY)).thenThrow(new Failure(false));
+        when(gateway.cancel("synthetic-key", MARKED_REASON, null, null, IDEMPOTENCY)).thenThrow(new Failure(Kind.REJECTED));
         assertThatThrownBy(() -> service.cancel("ORD-TEST", 7, FULL))
                 .isInstanceOfSatisfying(PaymentConfirmationException.class, e -> assertThat(e.status()).isEqualTo(422));
         verify(store).reject(21, 31);
