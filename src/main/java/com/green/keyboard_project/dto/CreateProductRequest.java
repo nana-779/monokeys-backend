@@ -34,6 +34,7 @@ public class CreateProductRequest {
     @Size(max = 500)
     private String thumbnailUrl;
 
+    @Size(max = 300, message = "상품 설명은 300자 이하로 입력해 주세요.")
     private String description;
 
     @Size(max = 20)

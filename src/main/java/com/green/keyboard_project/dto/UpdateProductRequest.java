@@ -27,6 +27,7 @@ public class UpdateProductRequest {
 
     private Boolean active;
 
+    @Size(max = 300, message = "상품 설명은 300자 이하로 입력해 주세요.")
     private String description;
 
     @Pattern(regexp = ".*\\S.*", message = "배열 규격은 공백일 수 없습니다.")
