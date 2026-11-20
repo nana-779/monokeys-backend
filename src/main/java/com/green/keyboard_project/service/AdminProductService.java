@@ -5,9 +5,11 @@ import com.green.keyboard_project.dto.ProductResponse;
 import com.green.keyboard_project.dto.UpdateProductRequest;
 import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.Product;
+import com.green.keyboard_project.entity.ProductImage;
 import com.green.keyboard_project.entity.ProductSpec;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.repository.CategoryRepository;
+import com.green.keyboard_project.repository.ProductImageRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.ProductSpecRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,7 @@ public class AdminProductService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final ProductSpecRepository productSpecRepository;
+    private final ProductImageRepository productImageRepository;
 
     // 관리자 상품 등록
     @Transactional
@@ -55,6 +58,7 @@ public class AdminProductService {
         productSpec.setKeycapMaterial(request.getKeycapMaterial());
 
         productSpecRepository.save(productSpec);
+        syncPrimaryProductImage(savedProduct, imageUrl);
 
         return ProductResponse.from(savedProduct, productSpec);
     }
@@ -113,7 +117,10 @@ public class AdminProductService {
         if (request.getStockQuantity() != null) product.setStockQuantity(request.getStockQuantity());
         if (request.getActive() != null) product.setActive(request.getActive());
         if (request.getDescription() != null) product.setDescription(request.getDescription());
-        if (imageUrl != null) product.setThumbnailUrl(imageUrl);
+        if (imageUrl != null) {
+            product.setThumbnailUrl(imageUrl);
+            syncPrimaryProductImage(product, imageUrl);
+        }
         product.setUpdatedAt(LocalDateTime.now());
 
         ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
@@ -144,6 +151,27 @@ public class AdminProductService {
                 .filter(product -> !product.isDeleted())
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다"))
                 .getThumbnailUrl();
+    }
+
+    // 대표 썸네일 변경 시 스토어 갤러리용 product_image(displayOrder = 0)도 함께 동기화
+    private void syncPrimaryProductImage(Product product, String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) return;
+        List<ProductImage> images = productImageRepository
+                .findByProduct_ProductIdOrderByDisplayOrderAsc(product.getProductId());
+        if (images.isEmpty()) {
+            ProductImage primary = new ProductImage();
+            primary.setProduct(product);
+            primary.setImageUrl(imageUrl);
+            primary.setDisplayOrder(0);
+            productImageRepository.save(primary);
+            return;
+        }
+        ProductImage primary = images.stream()
+                .filter(img -> img.getDisplayOrder() == 0)
+                .findFirst()
+                .orElse(images.getFirst());
+        primary.setImageUrl(imageUrl);
+        productImageRepository.save(primary);
     }
 
     // 카테고리 보조 메서드
