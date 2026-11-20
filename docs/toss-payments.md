@@ -163,3 +163,15 @@ paymentStatus, completed, method, approvedAt, storage를 포함합니다. paymen
 - https://docs.tosspayments.com/reference
 - https://docs.tosspayments.com/reference/using-api/authorization
 - https://docs.tosspayments.com/reference/using-api/api-keys
+
+## 회원 주문 환불 사전 확인
+
+`GET /api/payments/orders/{orderNumber}/refund/eligibility`는 로그인한 회원의 주문과 로컬 결제·환불 기록을 조회합니다. 없는 주문과 다른 회원의 주문은 같은 404로 응답합니다. 응답에는 결제 키·회원 개인정보가 포함되지 않습니다.
+
+- `PRECHECK_PASSED`는 로컬에서 일반상품 전액 취소의 사전 조건을 충족했다는 뜻입니다. `BLOCKED`는 결제 미완료, 진행 중인 환불, 이미 완료된 취소 또는 로컬 데이터 불일치를 나타냅니다. `POLICY_REVIEW_REQUIRED`는 배송, 조립상품, 가상계좌, 이전 부분 취소처럼 정책을 확인해야 하는 경우에 반환합니다.
+- 잔액은 저장된 결제금액에서 완료 상태의 환불금액만 차감한 값입니다. Toss의 실제 잔액과 취소 가능 여부는 이후 실행 단계에서 다시 확인해야 합니다. 이 조회는 데이터 변경이나 Toss 호출을 수행하지 않습니다.
+- 후속 취소 연동은 기존 서버 전용 `TOSS_PAYMENTS_SECRET_KEY` 참조와 테스트 키 검증을 재사용합니다. 테스트 연결은 로컬 프로필과 관련 테스트 플래그를 적용하며, 운영 키는 테스트 클라이언트에서 거절합니다.
+- 실행 단계에서 동일 요청을 다시 확인할 때는 같은 `Idempotency-Key`를 사용합니다. 확정 거절과 결과 미확정을 구분하고, 타임아웃이나 처리 중 응답에서는 새 멱등키로 취소를 반복하기 전에 Toss 상태를 확인합니다.
+- 부분 취소는 Toss 잔액과 `isPartialCancelable` 및 팀 정책을 확인해야 합니다. 가상계좌 입금 전에는 전액 취소만 가능하고 입금 후에는 환불계좌가 필요합니다.
+
+[Toss 결제 취소 가이드](https://docs.tosspayments.com/guides/v2/cancel-payment) · [인증 및 멱등키](https://docs.tosspayments.com/reference/using-api/authorization)

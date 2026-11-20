@@ -46,6 +46,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/logout", "/api/auth/refresh").permitAll()
                         .requestMatchers("/api/users/signup", "/api/auth/check-email").permitAll()
                         .requestMatchers("/api/auth/me").authenticated()
+                        // 환불 사전 조회는 회원만 접근하며, 서비스에서 해당 회원의 주문인지 확인합니다.
+                        .requestMatchers("/api/payments/orders/{orderNumber}/refund/eligibility").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/products/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
