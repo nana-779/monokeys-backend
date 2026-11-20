@@ -32,6 +32,8 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testRuntimeOnly 'com.h2database:h2'
 	runtimeOnly 'com.mysql:mysql-connector-j'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway' // DB 마이그레이션
+	implementation 'org.flywaydb:flyway-mysql' // Flyway MySQL 지원
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok' // getter, setter 간편하게
 	implementation 'org.springframework.security:spring-security-crypto' // 비밀번호 해싱을 위한 프레임워크
