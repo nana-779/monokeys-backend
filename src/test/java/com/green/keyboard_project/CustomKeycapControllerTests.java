@@ -260,6 +260,25 @@ class CustomKeycapControllerTests {
         }
     }
 
+    @Test
+    void rejectsMixedProductPathAndPreservesProductImages() throws Exception {
+        Cookie[] cookies = signupAndLogin("keycap-mixed-path@example.com");
+        String productUuidFilename = java.util.UUID.randomUUID() + ".png";
+        Path productDir = tempUploadRoot.resolve("products");
+        Files.createDirectories(productDir);
+        Path productImage = productDir.resolve(productUuidFilename);
+        Files.write(productImage, new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A});
+
+        String mixedUrl = "http://localhost:8080/uploads/custom-keycaps/x/uploads/products/" + productUuidFilename;
+        mvc.perform(delete("/api/custom-keycaps/images")
+                        .param("imageUrl", mixedUrl)
+                        .cookie(cookies))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(false));
+
+        assertThat(Files.exists(productImage)).isTrue();
+    }
+
     private Cookie[] signupAndLogin(String email) throws Exception {
         mvc.perform(post("/api/users/signup")
                         .contentType("application/json")

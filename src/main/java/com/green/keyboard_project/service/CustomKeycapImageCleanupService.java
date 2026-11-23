@@ -64,8 +64,16 @@ public class CustomKeycapImageCleanupService {
         if (isReferencedInCart(filename)) {
             return false;
         }
-        imageStorageService.deleteByUrl(imageUrl);
-        return true;
+        Path baseDir = imageStorageService.getCustomKeycapDirectory().toAbsolutePath().normalize();
+        Path target = baseDir.resolve(filename).normalize();
+        if (!target.startsWith(baseDir)) {
+            return false;
+        }
+        try {
+            return Files.deleteIfExists(target);
+        } catch (IOException e) {
+            throw new IllegalStateException("커스텀 키캡 이미지를 삭제할 수 없습니다.", e);
+        }
     }
 
     /**
@@ -130,15 +138,23 @@ public class CustomKeycapImageCleanupService {
     }
 
     private Optional<String> extractCustomKeycapFilename(String imageUrl) {
-        if (imageUrl == null || imageUrl.isBlank() || !imageUrl.contains(CUSTOM_KEYCAPS_PREFIX)) {
+        if (imageUrl == null || imageUrl.isBlank()) {
             return Optional.empty();
         }
         String trimmed = imageUrl.trim();
+        int hashIdx = trimmed.indexOf('#');
+        if (hashIdx >= 0) {
+            trimmed = trimmed.substring(0, hashIdx);
+        }
         int queryIdx = trimmed.indexOf('?');
         if (queryIdx >= 0) {
             trimmed = trimmed.substring(0, queryIdx);
         }
-        String filename = trimmed.substring(trimmed.lastIndexOf('/') + 1);
+        int prefixIdx = trimmed.lastIndexOf(CUSTOM_KEYCAPS_PREFIX);
+        if (prefixIdx < 0 || trimmed.contains("/uploads/products/")) {
+            return Optional.empty();
+        }
+        String filename = trimmed.substring(prefixIdx + CUSTOM_KEYCAPS_PREFIX.length());
         if (!UUID_IMAGE_FILENAME.matcher(filename).matches()) {
             return Optional.empty();
         }
