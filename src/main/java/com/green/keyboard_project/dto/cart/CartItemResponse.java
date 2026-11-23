@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
+
 /**
  * 장바구니 아이템 응답 DTO (1파일 1클래스)
  */
@@ -26,4 +28,6 @@ public class CartItemResponse {
     private Integer stockQuantity;
     private Integer quantity;
     private String thumbnailUrl;
+    private Boolean includeAssembly;
+    private List<Integer> partProductIds;
 }

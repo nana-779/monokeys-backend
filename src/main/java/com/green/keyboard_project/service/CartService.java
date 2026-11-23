@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -71,12 +73,18 @@ public class CartService {
                         .min()
                         .orElse(0);
 
+                List<Integer> partIds = buildItems.stream()
+                        .map(i -> i.getProduct().getProductId())
+                        .toList();
+
                 builder.manualBuildId(manualBuild.getManualBuildId())
                         .buildType("MANUAL")
                         .name(manualBuild.getBuildName())
                         .price(manualBuild.getTotalPrice())
                         .stockQuantity(maxStock)
-                        .thumbnailUrl(thumb);
+                        .thumbnailUrl(thumb)
+                        .includeAssembly(manualBuild.isIncludeAssembly())
+                        .partProductIds(partIds);
             } else if (autoBuild != null) {
 
 
@@ -99,12 +107,18 @@ public class CartService {
                         .min()
                         .orElse(0);
 
+                List<Integer> partIds = buildItems.stream()
+                        .map(i -> i.getProduct().getProductId())
+                        .toList();
+
                 builder.autoBuildId(autoBuild.getAutoBuildId())
                         .buildType("AUTO")
                         .name(autoBuild.getBuildName())
                         .price(autoBuild.getTotalPrice())
                         .stockQuantity(maxStock)
-                        .thumbnailUrl(thumb);
+                        .thumbnailUrl(thumb)
+                        .includeAssembly(autoBuild.isIncludeAssembly())
+                        .partProductIds(partIds);
             }
 
             return  builder.build();
@@ -123,25 +137,58 @@ public class CartService {
         if (request.getManualBuildId() != null) {
             ManualBuild manualBuild = manualBuildRepository.findById(request.getManualBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("커스텀 빌드를 찾을 수 없습니다."));
-
-            int availableStock = manualBuildItemRepository.findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(manualBuild.getManualBuildId())
-                    .stream()
+            // 1. 이번에 담으려는 빌드의 부품 4개 ID 및 조립 옵션 추출
+            List<ManualBuildItem> newBuildItems = manualBuildItemRepository
+                    .findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(manualBuild.getManualBuildId());
+            Set<Integer> newProductIds = newBuildItems.stream()
+                    .map(item -> item.getProduct().getProductId())
+                    .collect(Collectors.toSet());
+            boolean newAssembly = manualBuild.isIncludeAssembly();
+            // 조립 가능한 최대 재고수(부품 중 최소 재고)
+            int availableStock = newBuildItems.stream()
                     .map(ManualBuildItem::getProduct)
                     .filter(p -> p != null)
                     .mapToInt(Product::getStockQuantity)
                     .min()
                     .orElse(0);
-
-            if (quantity > availableStock) {
-                throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
+            // 2. 이미 장바구니에 "동일한 부품 조합"의 수동 빌드가 있는지 탐색
+            List<CartItem> userCartItems = cartItemRepository.findByUser_UserId(userId);
+            CartItem existingMatch = null;
+            for (CartItem ci : userCartItems) {
+                if (ci.getManualBuild() != null) {
+                    ManualBuild existingBuild = ci.getManualBuild();
+                    // 조립 옵션이 같을 때 부품 4개 ID가 완전히 일치하는지 비교
+                    if (existingBuild.isIncludeAssembly() == newAssembly) {
+                        Set<Integer> existProductIds = manualBuildItemRepository
+                                .findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(existingBuild.getManualBuildId())
+                                .stream()
+                                .map(item -> item.getProduct().getProductId())
+                                .collect(Collectors.toSet());
+                        if (existProductIds.equals(newProductIds)) {
+                            existingMatch = ci; // 👈 똑같은 부품 조합 발견!
+                            break;
+                        }
+                    }
+                }
             }
-
-            Optional<CartItem> existing = cartItemRepository.findByUserAndManualBuild(user, manualBuild);
-            if (existing.isPresent()) {
-                CartItem item = existing.get();
-                item.setQuantity(item.getQuantity() + quantity);
-                item.setUpdatedAt(LocalDateTime.now());
+            // 3. 동일한 조합이 이미 있으면 기존 장바구니 항목의 수량만 증가
+            if (existingMatch != null) {
+                int finalQuantity = existingMatch.getQuantity() + quantity;
+                if (finalQuantity > availableStock) {
+                    throw new InvalidStateException("부품 재고가 부족하여 수량을 더 추가할 수 없습니다. (최대 가능: " + availableStock + "개)");
+                }
+                existingMatch.setQuantity(finalQuantity);
+                existingMatch.setUpdatedAt(LocalDateTime.now());
+                // 새로 임시 발급되었던 중복 빌드는 DB에서 깔끔하게 정리 삭제
+                if (manualBuild.getManualBuildId() != existingMatch.getManualBuild().getManualBuildId()) {
+                    manualBuildItemRepository.deleteByManualBuild_ManualBuildId(manualBuild.getManualBuildId());
+                    manualBuildRepository.delete(manualBuild);
+                }
             } else {
+                // 새로운 조합이면 새로 장바구니에 등록
+                if (quantity > availableStock) {
+                    throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
+                }
                 CartItem newItem = new CartItem();
                 newItem.setUser(user);
                 newItem.setManualBuild(manualBuild);
@@ -152,28 +199,55 @@ public class CartService {
             }
             return;
         }
-        // [B] 자동 추천 빌드 저장
+        // [B] 자동 추천 빌드 저장 (수동과 동일한 조합 검사)
         if (request.getAutoBuildId() != null) {
             AutoBuild autoBuild = autoBuildRepository.findById(request.getAutoBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("추천 빌드를 찾을 수 없습니다."));
-
-            int availableStock = autoBuildItemRepository.findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(autoBuild.getAutoBuildId())
-                    .stream()
+            List<AutoBuildItem> newBuildItems = autoBuildItemRepository
+                    .findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(autoBuild.getAutoBuildId());
+            Set<Integer> newProductIds = newBuildItems.stream()
+                    .map(item -> item.getProduct().getProductId())
+                    .collect(Collectors.toSet());
+            boolean newAssembly = autoBuild.isIncludeAssembly();
+            int availableStock = newBuildItems.stream()
                     .map(AutoBuildItem::getProduct)
                     .filter(p -> p != null)
                     .mapToInt(Product::getStockQuantity)
                     .min()
                     .orElse(0);
-            if (quantity > availableStock) {
-                throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
+            List<CartItem> userCartItems = cartItemRepository.findByUser_UserId(userId);
+            CartItem existingMatch = null;
+            for (CartItem ci : userCartItems) {
+                if (ci.getAutoBuild() != null) {
+                    AutoBuild existingBuild = ci.getAutoBuild();
+                    if (existingBuild.isIncludeAssembly() == newAssembly) {
+                        Set<Integer> existProductIds = autoBuildItemRepository
+                                .findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(existingBuild.getAutoBuildId())
+                                .stream()
+                                .map(item -> item.getProduct().getProductId())
+                                .collect(Collectors.toSet());
+                        if (existProductIds.equals(newProductIds)) {
+                            existingMatch = ci;
+                            break;
+                        }
+                    }
+                }
             }
-
-            Optional<CartItem> existing = cartItemRepository.findByUserAndAutoBuild(user, autoBuild);
-            if (existing.isPresent()) {
-                CartItem item = existing.get();
-                item.setQuantity(item.getQuantity() + quantity);
-                item.setUpdatedAt(LocalDateTime.now());
+            if (existingMatch != null) {
+                int finalQuantity = existingMatch.getQuantity() + quantity;
+                if (finalQuantity > availableStock) {
+                    throw new InvalidStateException("부품 재고가 부족하여 수량을 더 추가할 수 없습니다. (최대 가능: " + availableStock + "개)");
+                }
+                existingMatch.setQuantity(finalQuantity);
+                existingMatch.setUpdatedAt(LocalDateTime.now());
+                if (autoBuild.getAutoBuildId() != existingMatch.getAutoBuild().getAutoBuildId()) {
+                    autoBuildItemRepository.deleteByAutoBuild_AutoBuildId(autoBuild.getAutoBuildId());
+                    autoBuildRepository.delete(autoBuild);
+                }
             } else {
+                if (quantity > availableStock) {
+                    throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
+                }
                 CartItem newItem = new CartItem();
                 newItem.setUser(user);
                 newItem.setAutoBuild(autoBuild);
