@@ -22,7 +22,7 @@ public record OrderCancellationRequest(Mode mode, String cancelReason, Integer c
         if (body == null || !body.isObject() || body.has("paymentKey")) throw invalid();
         Mode mode = switch (body.path("mode").asText("")) {
             case "FULL" -> Mode.FULL;
-            case "PARTIAL" -> Mode.PARTIAL;
+            case "PARTIAL" -> throw fullCancellationOnly();
             default -> throw invalid();
         };
         JsonNode amount = body.path("cancelAmount");
@@ -31,6 +31,10 @@ public record OrderCancellationRequest(Mode mode, String cancelReason, Integer c
                 absent(amount) ? null : integer(amount), integer(body.path("expectedRemainingAmount")),
                 absent(account) ? null : new RefundAccount(text(account, "bank"),
                         text(account, "accountNumber"), text(account, "holderName")));
+    }
+
+    public static PaymentConfirmationException fullCancellationOnly() {
+        return new PaymentConfirmationException(400, "FULL_CANCELLATION_ONLY", "현재는 전액 취소만 요청할 수 있습니다.");
     }
 
     // 이전 요청으로 잔액이 바뀌면 같은 요청이 다시 들어와도 취소하지 않습니다.

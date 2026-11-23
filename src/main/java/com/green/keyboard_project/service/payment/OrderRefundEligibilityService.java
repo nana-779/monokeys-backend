@@ -17,6 +17,7 @@ import com.green.keyboard_project.repository.orders.OrderItemRepository;
 import com.green.keyboard_project.repository.orders.OrderRepository;
 import com.green.keyboard_project.repository.payment.PaymentRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +35,7 @@ public class OrderRefundEligibilityService {
     private final RefundRepository refunds;
     private final OrderDeliveryRepository deliveries;
     private final OrderItemRepository items;
+    private final ObjectProvider<TossCancellationGateway> gateways;
 
     @Transactional(readOnly = true)
     public OrderRefundPreview preview(String orderNumber, Integer memberId) {
@@ -47,7 +49,7 @@ public class OrderRefundEligibilityService {
         Payment payment = payments.findByOrder_OrderId(order.getOrderId()).orElse(null);
         if (payment == null) {
             return new OrderRefundPreview(order.getOrderNumber(), null, null, null, Status.BLOCKED,
-                    "등록된 결제 정보가 없습니다.");
+                    "등록된 결제 정보가 없습니다.", false);
         }
 
         List<Refund> history = refunds.findByPayment_PaymentIdOrderByRequestedAtDesc(payment.getPaymentId());
@@ -102,11 +104,12 @@ public class OrderRefundEligibilityService {
                 message = "조립상품이 포함된 주문은 취소 정책을 확인해야 합니다.";
             } else {
                 status = Status.PRECHECK_PASSED;
-                message = "로컬 사전 조건을 충족했습니다. Toss 상태는 확인하지 않았으며 취소는 실행되지 않습니다.";
+                message = "로컬 사전 조건을 충족했습니다. 실제 요청 시 Toss 결제 상태를 확인합니다.";
             }
         }
 
+        // 화면에는 실행 가능 여부만 전달합니다. 사전 조회 중에는 결제사에 접속하지 않습니다.
         return new OrderRefundPreview(order.getOrderNumber(), paidAmount, payment.getPaymentStatus(),
-                remainingAmount, status, message);
+                remainingAmount, status, message, gateways.getIfAvailable() != null);
     }
 }

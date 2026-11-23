@@ -88,7 +88,7 @@ public class OrderCancellationStore {
         return refunds.saveAndFlush(refund).getRefundId();
     }
 
-    // 확인된 취소 거래와 결제 상태를 함께 저장합니다. 주문·배송·재고의 후속 처리는 팀 협의 범위입니다.
+    // 확인된 전액 취소는 주문·결제·환불 상태를 같은 트랜잭션에서 저장합니다.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void complete(int paymentId, int refundId, TossCancellationGateway.Cancellation cancellation) {
         Refund refund = lockedRefund(paymentId, refundId);
@@ -114,10 +114,11 @@ public class OrderCancellationStore {
         refund.setPgCancelTid(cancellation.transactionKey());
         refund.setRefundedAt(canceledAt);
         refund.setStatus(RefundStatusType.COMPLETED);
-        // 부분 취소는 PAID를 유지하고 이력에서 잔액을 계산합니다. 잔액이 0인 경우에만 결제를 CANCELLED로 바꿉니다.
+        // 결제 잔액을 모두 취소한 경우에만 주문과 결제를 취소 완료로 바꿉니다.
         if (cancellation.amount() == remaining) {
             payment.setPaymentStatus(PaymentStatusType.CANCELLED);
             payment.setCancelledAt(canceledAt);
+            payment.getOrder().setOrderStatus(OrderStatusType.CANCELLED);
         }
     }
 

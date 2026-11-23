@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** 본인 결제의 취소를 조율합니다. 결제사 연결이 준비되기 전에는 조회와 유효성 검사까지만 실행합니다. */
+/** 본인 결제의 전액 취소 요청과 저장된 환불 결과의 재확인을 조율합니다. */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -31,8 +31,17 @@ public class OrderCancellationService {
 
     @Transactional(propagation = Propagation.NEVER)
     public Result cancel(String orderNumber, Integer memberId, OrderCancellationRequest request) {
+        // HTTP 이외의 경로에서 호출해도 부분 취소 요청은 결제 조회 전에 거부합니다.
+        if (request.mode() != OrderCancellationRequest.Mode.FULL) {
+            throw OrderCancellationRequest.fullCancellationOnly();
+        }
         Target target = store.inspect(orderNumber, memberId);
         int amount = request.amountFor(target.remaining());
+        // 사전 확인 화면과 같은 기준으로 최초 결제 금액 전체를 취소할 수 있는 주문만 받습니다.
+        if (target.remaining() != target.total()) {
+            throw new PaymentConfirmationException(409, "REFUND_BALANCE_CHANGED",
+                    "이전 취소 내역이 있는 결제는 전액 취소할 수 없습니다.");
+        }
         TossCancellationGateway gateway = configuredGateway();
 
         Snapshot before;
@@ -130,7 +139,7 @@ public class OrderCancellationService {
     }
 
     private TossCancellationGateway configuredGateway() {
-        // 결제·재고·배송 후속 정책이 확정될 때까지 실제 클라이언트를 컨테이너에 등록하지 않습니다.
+        // 테스트 환경 활성화 조건이 충족되지 않으면 결제사와 통신하지 않습니다.
         TossCancellationGateway gateway = gateways.getIfAvailable();
         if (gateway == null) {
             throw new PaymentConfirmationException(503, "CANCELLATION_NOT_ENABLED", "결제 취소 기능은 준비 중입니다.");

@@ -23,7 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Supplier;
 
-/** 기존 테스트 인증 정보를 사용하는 취소 전용 클라이언트입니다. 현재 Spring 빈으로 연결하지 않습니다. */
+/** 검증된 테스트 시크릿을 사용하는 취소 전용 클라이언트입니다. */
 public final class TossCancellationClient implements TossCancellationGateway {
     private static final String BASE_URL = "https://api.tosspayments.com";
     private final RestClient http;

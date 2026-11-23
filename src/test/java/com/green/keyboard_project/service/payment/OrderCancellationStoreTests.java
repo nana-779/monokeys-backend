@@ -16,6 +16,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -63,6 +64,38 @@ class OrderCancellationStoreTests {
         guard.verify(em).find(Payment.class, 21, LockModeType.PESSIMISTIC_WRITE);
         guard.verify(refunds).findByPayment_PaymentIdOrderByRequestedAtDesc(21);
         verify(refunds, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void alreadyCanceledPaymentIsRejectedBeforeARefundCanBeReserved() {
+        setupPaidCard();
+        payment.setPaymentStatus(Payment.PaymentStatusType.CANCELLED);
+
+        assertThatThrownBy(() -> store.inspect("ORD-1", 1))
+                .isInstanceOfSatisfying(PaymentConfirmationException.class,
+                        error -> assertThat(error.code()).isEqualTo("INVALID_PAYMENT_STATE"));
+        verifyNoInteractions(refunds, em);
+    }
+
+    @Test
+    void confirmedFullCancellationUpdatesOrderPaymentAndRefund() {
+        setupPaidCard();
+        var pending = new Refund();
+        pending.setPayment(payment);
+        pending.setAmount(100);
+        pending.setStatus(Refund.RefundStatusType.REQUESTED);
+        when(em.find(Payment.class, 21, LockModeType.PESSIMISTIC_WRITE)).thenReturn(payment);
+        when(refunds.findById(7)).thenReturn(Optional.of(pending));
+        when(refunds.findByPayment_PaymentIdOrderByRequestedAtDesc(21)).thenReturn(List.of(pending));
+        var confirmed = new TossCancellationGateway.Cancellation(
+                "test-transaction", "테스트", 100, OffsetDateTime.parse("2026-11-23T14:00:00+09:00"), "DONE");
+
+        store.complete(21, 7, confirmed);
+
+        assertThat(order.getOrderStatus()).isEqualTo(Order.OrderStatusType.CANCELLED);
+        assertThat(payment.getPaymentStatus()).isEqualTo(Payment.PaymentStatusType.CANCELLED);
+        assertThat(pending.getStatus()).isEqualTo(Refund.RefundStatusType.COMPLETED);
+        assertThat(pending.getPgCancelTid()).isEqualTo("test-transaction");
     }
 
     @Test

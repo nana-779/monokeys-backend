@@ -1,5 +1,6 @@
 package com.green.keyboard_project.service;
 
+import com.green.keyboard_project.dto.order.MyOrderSummary;
 import com.green.keyboard_project.dto.order.OrderCreateRequest;
 import com.green.keyboard_project.dto.order.OrderItemRequest;
 import com.green.keyboard_project.dto.order.OrderItemResponse;
@@ -11,6 +12,7 @@ import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
+import com.green.keyboard_project.exceptions.UnauthenticatedException;
 import com.green.keyboard_project.repository.payment.PaymentRepository;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.orders.OrderItemRepository;
@@ -181,6 +183,15 @@ public class OrderService {
         }
 
         return responses;
+    }
+
+    // 회원 번호가 없는 요청은 조회를 시작하기 전에 막습니다.
+    @Transactional(readOnly = true)
+    public List<MyOrderSummary> getMyOrders(Integer userId) {
+        if (userId == null) {
+            throw new UnauthenticatedException("로그인이 필요합니다.");
+        }
+        return orderRepository.findMyOrderSummaries(userId);
     }
 
     /**

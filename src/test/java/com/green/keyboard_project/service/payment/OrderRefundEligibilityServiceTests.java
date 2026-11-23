@@ -21,6 +21,7 @@ import com.green.keyboard_project.repository.orders.OrderRepository;
 import com.green.keyboard_project.repository.payment.PaymentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.data.repository.query.parser.PartTree;
 
 import java.util.List;
@@ -42,7 +43,8 @@ class OrderRefundEligibilityServiceTests {
     private final OrderDeliveryRepository deliveries = mock(OrderDeliveryRepository.class);
     private final OrderItemRepository items = mock(OrderItemRepository.class);
     private final OrderRefundEligibilityService service =
-            new OrderRefundEligibilityService(orders, payments, refunds, deliveries, items);
+            new OrderRefundEligibilityService(orders, payments, refunds, deliveries, items,
+                    new StaticListableBeanFactory().getBeanProvider(TossCancellationGateway.class));
     private final Order order = new Order();
     private final Payment payment = new Payment();
 
@@ -101,6 +103,7 @@ class OrderRefundEligibilityServiceTests {
         var preview = service.preview(ORDER_NUMBER, MEMBER_ID);
         assertThat(preview.status()).isEqualTo(Status.PRECHECK_PASSED);
         assertThat(preview.localRemainingAmount()).isEqualTo(10_000);
+        assertThat(preview.cancellationEnabled()).isFalse();
         assertThat(preview.toString()).doesNotContain(payment.getPgTid());
     }
 

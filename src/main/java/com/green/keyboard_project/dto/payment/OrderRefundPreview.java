@@ -9,7 +9,8 @@ public record OrderRefundPreview(
         PaymentStatusType paymentStatus,
         Integer localRemainingAmount,
         Status status,
-        String message
+        String message,
+        boolean cancellationEnabled
 ) {
     public enum Status {
         PRECHECK_PASSED, BLOCKED, POLICY_REVIEW_REQUIRED

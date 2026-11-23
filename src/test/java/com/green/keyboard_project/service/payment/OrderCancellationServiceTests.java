@@ -68,18 +68,23 @@ class OrderCancellationServiceTests {
     }
 
     @Test
-    void partialRequestUsesAmountAndReplayWithOlderBalanceIsBlocked() {
+    void partialRequestIsRejectedBeforeStorageOrProviderAccess() {
         var partial = new OrderCancellationRequest(Mode.PARTIAL, REASON, 2_000, 10_000, null);
-        reserve(partial);
-        when(gateway.cancel("synthetic-key", MARKED_REASON, 2_000, null, IDEMPOTENCY))
-                .thenReturn(snapshot("PARTIAL_CANCELED", 8_000, false, cancellation(MARKED_REASON, 2_000)));
-        assertThat(service.cancel("ORD-TEST", 7, partial).amount()).isEqualTo(2_000);
-
-        when(store.inspect("ORD-TEST", 7)).thenReturn(new Target(21, "ORD-TEST", "synthetic-key", 10_000, 8_000));
         assertThatThrownBy(() -> service.cancel("ORD-TEST", 7, partial))
                 .isInstanceOfSatisfying(PaymentConfirmationException.class,
+                        e -> assertThat(e.code()).isEqualTo("FULL_CANCELLATION_ONLY"));
+        verifyNoInteractions(store, gateway);
+    }
+
+    @Test
+    void fullRequestCannotCancelOnlyTheRemainderOfAPreviouslyCanceledPayment() {
+        when(store.inspect("ORD-TEST", 7)).thenReturn(new Target(21, "ORD-TEST", "synthetic-key", 10_000, 8_000));
+        var remainingOnly = new OrderCancellationRequest(Mode.FULL, REASON, null, 8_000, null);
+        assertThatThrownBy(() -> service.cancel("ORD-TEST", 7, remainingOnly))
+                .isInstanceOfSatisfying(PaymentConfirmationException.class,
                         e -> assertThat(e.code()).isEqualTo("REFUND_BALANCE_CHANGED"));
-        verify(gateway, times(1)).cancel(any(), any(), any(), any(), any());
+        verify(store, never()).reserve(any(), any(), any());
+        verifyNoInteractions(gateway);
     }
 
     @Test
@@ -163,7 +168,7 @@ class OrderCancellationServiceTests {
                 {"mode":"FULL","cancelReason":"reason","expectedRemainingAmount":10,"paymentKey":"from-browser"}
                 """,
                 """
-                {"mode":"PARTIAL","cancelReason":"reason","expectedRemainingAmount":10,"cancelAmount":1.5}
+                {"mode":"FULL","cancelReason":"reason","expectedRemainingAmount":10.5}
                 """,
                 """
                 {"mode":"FULL","cancelReason":" ","expectedRemainingAmount":10}
@@ -171,6 +176,16 @@ class OrderCancellationServiceTests {
             assertThatThrownBy(() -> OrderCancellationRequest.fromJson(json.readTree(body)))
                     .isInstanceOfSatisfying(PaymentConfirmationException.class, e -> assertThat(e.status()).isEqualTo(400));
         }
+    }
+
+    @Test
+    void jsonRejectsWellFormedPartialRequest() {
+        var body = JsonMapper.builder().build().readTree("""
+                {"mode":"PARTIAL","cancelReason":"reason","expectedRemainingAmount":10,"cancelAmount":1}
+                """);
+        assertThatThrownBy(() -> OrderCancellationRequest.fromJson(body))
+                .isInstanceOfSatisfying(PaymentConfirmationException.class,
+                        e -> assertThat(e.code()).isEqualTo("FULL_CANCELLATION_ONLY"));
     }
 
     private void reserve(OrderCancellationRequest request) {
