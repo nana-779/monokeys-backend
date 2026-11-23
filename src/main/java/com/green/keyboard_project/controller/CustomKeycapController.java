@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import com.green.keyboard_project.exceptions.UnauthenticatedException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/api/custom-keycaps")
@@ -25,9 +27,13 @@ public class CustomKeycapController {
      */
     @PostMapping(value = "/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CustomKeycapImageUploadResponse>> uploadCustomKeycapImages(
+            @AuthenticationPrincipal Integer userId,
             @RequestPart("image") MultipartFile image,
             @RequestPart(value = "previewImage", required = false) MultipartFile previewImage
     ) {
+        if (userId == null) {
+            throw new UnauthenticatedException("로그인이 필요합니다.");
+        }
         String imageUrl = imageStorageService.storeCustomKeycap(image);
         String previewImageUrl = imageUrl;
         if (previewImage != null && !previewImage.isEmpty()) {
