@@ -6,6 +6,7 @@ import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.repository.CategoryRepository;
 import com.green.keyboard_project.repository.ProductRepository;
+import com.green.keyboard_project.service.CustomKeycapImageCleanupService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import org.springframework.web.context.WebApplicationContext;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -52,13 +54,22 @@ class CustomKeycapControllerTests {
     @Autowired WebApplicationContext context;
     @Autowired CategoryRepository categoryRepository;
     @Autowired ProductRepository productRepository;
+    @Autowired CustomKeycapImageCleanupService imageCleanupService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private MockMvc mvc;
     private Product customProduct;
 
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
+        Path keycapUploadDir = tempUploadRoot.resolve("custom-keycaps");
+        Files.createDirectories(keycapUploadDir);
+        try (var stream = Files.list(keycapUploadDir)) {
+            for (Path existing : stream.toList()) {
+                Files.deleteIfExists(existing);
+            }
+        }
+
         mvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(context.getBean(FilterChainProxy.class))
                 .build();
@@ -165,6 +176,88 @@ class CustomKeycapControllerTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].customDesignData").value(designB));
+    }
+
+    @Test
+    void deletesUnreferencedImageAndProtectsCartReferencedImage() throws Exception {
+        Cookie[] cookies = signupAndLogin("keycap-cleanup@example.com");
+        byte[] pngHeader = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00};
+
+        String orphanRes = mvc.perform(multipart("/api/custom-keycaps/images")
+                        .file(new MockMultipartFile("image", "orphan.png", "image/png", pngHeader))
+                        .cookie(cookies))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String orphanUrl = objectMapper.readTree(orphanRes).path("data").path("imageUrl").asText();
+
+        String inCartRes = mvc.perform(multipart("/api/custom-keycaps/images")
+                        .file(new MockMultipartFile("image", "in-cart.png", "image/png", pngHeader))
+                        .cookie(cookies))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String inCartUrl = objectMapper.readTree(inCartRes).path("data").path("imageUrl").asText();
+
+        String cartDesign = objectMapper.writeValueAsString(
+                Map.of("keyType", "R4", "printImageUrl", inCartUrl, "previewImageUrl", inCartUrl));
+        mvc.perform(post("/api/cart")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("productId", customProduct.getProductId(), "quantity", 1, "customDesignData", cartDesign))))
+                .andExpect(status().isOk());
+
+        mvc.perform(delete("/api/custom-keycaps/images").param("imageUrl", orphanUrl))
+                .andExpect(status().isUnauthorized());
+
+        mvc.perform(delete("/api/custom-keycaps/images")
+                        .param("imageUrl", inCartUrl)
+                        .cookie(cookies))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(false));
+
+        mvc.perform(delete("/api/custom-keycaps/images")
+                        .param("imageUrl", orphanUrl)
+                        .cookie(cookies))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(true));
+
+        try (var stream = Files.list(tempUploadRoot.resolve("custom-keycaps"))) {
+            assertThat(stream.count()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void cleanupOrphanFilesRemovesExpiredUnreferencedFilesOnly() throws Exception {
+        Cookie[] cookies = signupAndLogin("keycap-gc@example.com");
+        byte[] pngHeader = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00};
+
+        mvc.perform(multipart("/api/custom-keycaps/images")
+                        .file(new MockMultipartFile("image", "orphan.png", "image/png", pngHeader))
+                        .cookie(cookies))
+                .andExpect(status().isCreated());
+
+        String keptRes = mvc.perform(multipart("/api/custom-keycaps/images")
+                        .file(new MockMultipartFile("image", "kept.png", "image/png", pngHeader))
+                        .cookie(cookies))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String keptUrl = objectMapper.readTree(keptRes).path("data").path("imageUrl").asText();
+
+        String cartDesign = objectMapper.writeValueAsString(
+                Map.of("keyType", "R4", "printImageUrl", keptUrl));
+        mvc.perform(post("/api/cart")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("productId", customProduct.getProductId(), "quantity", 1, "customDesignData", cartDesign))))
+                .andExpect(status().isOk());
+
+        int deleted = imageCleanupService.cleanupOrphanFilesOlderThan(Duration.ZERO);
+        assertThat(deleted).isEqualTo(1);
+
+        try (var stream = Files.list(tempUploadRoot.resolve("custom-keycaps"))) {
+            assertThat(stream.count()).isEqualTo(1);
+        }
     }
 
     private Cookie[] signupAndLogin(String email) throws Exception {
