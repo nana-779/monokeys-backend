@@ -1,13 +1,11 @@
 package com.green.keyboard_project.service;
 
+import com.green.keyboard_project.dto.cart.CartAddRequest;
 import com.green.keyboard_project.dto.cart.CartItemResponse;
-import com.green.keyboard_project.entity.CartItem;
-import com.green.keyboard_project.entity.Product;
-import com.green.keyboard_project.entity.User;
+import com.green.keyboard_project.entity.*;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
-import com.green.keyboard_project.repository.ProductRepository;
-import com.green.keyboard_project.repository.UserRepository;
+import com.green.keyboard_project.repository.*;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +23,10 @@ public class CartService {
     private final CartItemRepository cartItemRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
+    private final ManualBuildRepository manualBuildRepository;
+    private final AutoBuildRepository autoBuildRepository;
+    private final ManualBuildItemRepository manualBuildItemRepository;
+    private final AutoBuildItemRepository autoBuildItemRepository;
 
     /**
      * 회원의 장바구니 목록 조회
@@ -34,16 +36,78 @@ public class CartService {
         List<CartItem> items = cartItemRepository.findByUser_UserId(userId);
         return items.stream().map(item -> {
             Product product = item.getProduct();
-            return CartItemResponse.builder()
-                    .cartItemId(item.getCartItemId())
-                    .userId(userId)
-                    .productId(product != null ? product.getProductId() : 0)
-                    .name(product != null ? product.getName() : "")
-                    .price(product != null ? product.getBasePrice() : 0)
-                    .stockQuantity(product != null ? product.getStockQuantity() : 0)
-                    .quantity(item.getQuantity())
-                    .thumbnailUrl(product != null ? product.getThumbnailUrl() : "")
-                    .build();
+            ManualBuild manualBuild = item.getManualBuild();
+            AutoBuild autoBuild = item.getAutoBuild();
+
+            CartItemResponse.CartItemResponseBuilder builder =
+                    CartItemResponse.builder()
+                            .cartItemId(item.getCartItemId())
+                            .userId(userId)
+                            .quantity(item.getQuantity());
+            if (product != null) {
+                builder.productId(product.getProductId())
+                        .buildType(null)
+                        .name(product.getName())
+                        .price(product.getBasePrice())
+                        .stockQuantity(product.getStockQuantity())
+                        .thumbnailUrl(product.getThumbnailUrl());
+            } else if (manualBuild != null) {
+                List<ManualBuildItem> buildItems = manualBuildItemRepository
+                        .findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(
+                                manualBuild.getManualBuildId());
+
+                String thumb = buildItems.stream()
+                        .map(ManualBuildItem :: getProduct)
+                        .filter(p -> p != null && p.getThumbnailUrl() != null && !p.getThumbnailUrl().isBlank())
+                        .map(Product::getThumbnailUrl)
+                        .findFirst()
+                        .orElse("");
+
+                // 재고수 설정 (부품중 재고수가 제일 적은 걸 최대 재고수로)
+                int maxStock = buildItems.stream()
+                        .map(ManualBuildItem::getProduct)
+                        .filter(p -> p != null)
+                        .mapToInt(Product::getStockQuantity)
+                        .min()
+                        .orElse(0);
+
+                builder.manualBuildId(manualBuild.getManualBuildId())
+                        .buildType("MANUAL")
+                        .name(manualBuild.getBuildName())
+                        .price(manualBuild.getTotalPrice())
+                        .stockQuantity(maxStock)
+                        .thumbnailUrl(thumb);
+            } else if (autoBuild != null) {
+
+
+
+                List<AutoBuildItem> buildItems = autoBuildItemRepository
+                        .findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(
+                                autoBuild.getAutoBuildId());
+
+                String thumb =buildItems.stream()
+                        .map(AutoBuildItem :: getProduct)
+                        .filter(p -> p != null && p.getThumbnailUrl() != null && !p.getThumbnailUrl().isBlank())
+                        .map(Product::getThumbnailUrl)
+                        .findFirst()
+                        .orElse("");
+
+                int maxStock = buildItems.stream()
+                        .map(AutoBuildItem::getProduct)
+                        .filter(p -> p != null)
+                        .mapToInt(Product::getStockQuantity)
+                        .min()
+                        .orElse(0);
+
+                builder.autoBuildId(autoBuild.getAutoBuildId())
+                        .buildType("AUTO")
+                        .name(autoBuild.getBuildName())
+                        .price(autoBuild.getTotalPrice())
+                        .stockQuantity(maxStock)
+                        .thumbnailUrl(thumb);
+            }
+
+            return  builder.build();
         }).toList();
     }
 
@@ -51,67 +115,142 @@ public class CartService {
      * 장바구니 상품 추가
      */
     @Transactional
-    public void addCartItem(int userId, int productId, int quantity) {
+    public void addCartItem(int userId, CartAddRequest request) {
         User user = findUser(userId);
-        Product product = findProduct(productId);
-        validateOnSale(product);
+        int quantity = request.getQuantity() != null && request.getQuantity() > 0 ? request.getQuantity() : 1;
 
-        if (quantity <= 0 || quantity > product.getStockQuantity()) {
-            throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+        // [A] 수동 커스텀 빌드 저장
+        if (request.getManualBuildId() != null) {
+            ManualBuild manualBuild = manualBuildRepository.findById(request.getManualBuildId())
+                    .orElseThrow(() -> new ResourceNotFoundException("커스텀 빌드를 찾을 수 없습니다."));
+
+            int availableStock = manualBuildItemRepository.findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(manualBuild.getManualBuildId())
+                    .stream()
+                    .map(ManualBuildItem::getProduct)
+                    .filter(p -> p != null)
+                    .mapToInt(Product::getStockQuantity)
+                    .min()
+                    .orElse(0);
+
+            if (quantity > availableStock) {
+                throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
+            }
+
+            Optional<CartItem> existing = cartItemRepository.findByUserAndManualBuild(user, manualBuild);
+            if (existing.isPresent()) {
+                CartItem item = existing.get();
+                item.setQuantity(item.getQuantity() + quantity);
+                item.setUpdatedAt(LocalDateTime.now());
+            } else {
+                CartItem newItem = new CartItem();
+                newItem.setUser(user);
+                newItem.setManualBuild(manualBuild);
+                newItem.setQuantity(quantity);
+                newItem.setCreatedAt(LocalDateTime.now());
+                newItem.setUpdatedAt(LocalDateTime.now());
+                cartItemRepository.save(newItem);
+            }
+            return;
         }
+        // [B] 자동 추천 빌드 저장
+        if (request.getAutoBuildId() != null) {
+            AutoBuild autoBuild = autoBuildRepository.findById(request.getAutoBuildId())
+                    .orElseThrow(() -> new ResourceNotFoundException("추천 빌드를 찾을 수 없습니다."));
 
-        Optional<CartItem> existingItem = cartItemRepository.findByUserAndProduct(user, product);
+            int availableStock = autoBuildItemRepository.findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(autoBuild.getAutoBuildId())
+                    .stream()
+                    .map(AutoBuildItem::getProduct)
+                    .filter(p -> p != null)
+                    .mapToInt(Product::getStockQuantity)
+                    .min()
+                    .orElse(0);
+            if (quantity > availableStock) {
+                throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
+            }
 
-        if (existingItem.isPresent()) {
-            CartItem item = existingItem.get();
-            if (item.getQuantity() + quantity > product.getStockQuantity()) {
+            Optional<CartItem> existing = cartItemRepository.findByUserAndAutoBuild(user, autoBuild);
+            if (existing.isPresent()) {
+                CartItem item = existing.get();
+                item.setQuantity(item.getQuantity() + quantity);
+                item.setUpdatedAt(LocalDateTime.now());
+            } else {
+                CartItem newItem = new CartItem();
+                newItem.setUser(user);
+                newItem.setAutoBuild(autoBuild);
+                newItem.setQuantity(quantity);
+                newItem.setCreatedAt(LocalDateTime.now());
+                newItem.setUpdatedAt(LocalDateTime.now());
+                cartItemRepository.save(newItem);
+            }
+            return;
+        }
+        // [C] 일반 단품 상품 저장
+        if (request.getProductId() != null) {
+            Product product = findProduct(request.getProductId());
+            validateOnSale(product);
+            if (quantity > product.getStockQuantity()) {
                 throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
             }
-            item.setQuantity(item.getQuantity() + quantity);
-            item.setUpdatedAt(LocalDateTime.now());
-        } else {
-            CartItem newItem = new CartItem();
-            newItem.setUser(user);
-            newItem.setProduct(product);
-            newItem.setQuantity(quantity);
-            newItem.setCreatedAt(LocalDateTime.now());
-            newItem.setUpdatedAt(LocalDateTime.now());
-
-            cartItemRepository.save(newItem);
+            Optional<CartItem> existing = cartItemRepository.findByUserAndProduct(user, product);
+            if (existing.isPresent()) {
+                CartItem item = existing.get();
+                if (item.getQuantity() + quantity > product.getStockQuantity()) {
+                    throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+                }
+                item.setQuantity(item.getQuantity() + quantity);
+                item.setUpdatedAt(LocalDateTime.now());
+            } else {
+                CartItem newItem = new CartItem();
+                newItem.setUser(user);
+                newItem.setProduct(product);
+                newItem.setQuantity(quantity);
+                newItem.setCreatedAt(LocalDateTime.now());
+                newItem.setUpdatedAt(LocalDateTime.now());
+                cartItemRepository.save(newItem);
+            }
+            return;
         }
+        throw new ResourceNotFoundException("추가할 상품 정보가 올바르지 않습니다.");
     }
 
     /**
-     * 장바구니 상품 수량 변경 (PATCH)
+     * 장바구니 상품 수량 변경 (PATCH /api/cart/{targetId})
      */
     @Transactional
-    public void updateCartItemQuantity(int userId, int productId, int quantity) {
+    public void updateCartItemQuantity(int userId, int targetId, int quantity) {
         User user = findUser(userId);
-        Product product = findProduct(productId);
-        validateOnSale(product);
-
-        if (quantity <= 0 || quantity > product.getStockQuantity()) {
+        if (quantity <= 0) {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
-
-        CartItem item = cartItemRepository.findByUserAndProduct(user, product)
-                .orElseThrow(() -> {
-                    log.warn("장바구니에 존재하지 않는 상품 수량 변경 시도. userId={}, productId={}", userId, productId);
-                    return new ResourceNotFoundException("장바구니에 해당 상품이 없습니다.");
-                });
-
+        // 1. cartItemId로 우선 조회, 없으면 productId로 조회
+        CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
+                .orElseGet(() -> productRepository.findById(targetId)
+                        .flatMap(product -> cartItemRepository.findByUserAndProduct(user, product))
+                        .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다.")));
+        if (item.getProduct() != null) {
+            validateOnSale(item.getProduct());
+            if (quantity > item.getProduct().getStockQuantity()) {
+                throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+            }
+        }
         item.setQuantity(quantity);
         item.setUpdatedAt(LocalDateTime.now());
     }
-
     /**
-     * 장바구니 상품 단건 삭제 (DELETE)
+     * 장바구니 상품 단건 삭제 (DELETE /api/cart/{targetId})
      */
     @Transactional
-    public void removeCartItem(int userId, int productId) {
+    public void removeCartItem(int userId, int targetId) {
         User user = findUser(userId);
-        Product product = findProduct(productId);
-        cartItemRepository.findByUserAndProduct(user, product)
+        // 1. cartItemId로 삭제
+        Optional<CartItem> byCartItemId = cartItemRepository.findByCartItemIdAndUser(targetId, user);
+        if (byCartItemId.isPresent()) {
+            cartItemRepository.delete(byCartItemId.get());
+            return;
+        }
+        // 2. productId로 넘어왔을 경우 대비
+        productRepository.findById(targetId)
+                .flatMap(product -> cartItemRepository.findByUserAndProduct(user, product))
                 .ifPresent(cartItemRepository::delete);
     }
 

@@ -18,6 +18,9 @@ public class CartItemResponse {
     private Integer cartItemId;
     private Integer userId;
     private Integer productId;
+    private Integer manualBuildId;  // 수동 빌드 식별용
+    private Integer autoBuildId;    // 자동 빌드 식별용
+    private String buildType;       // "MANUAL", "AUTO", 일반 상품은 null
     private String name;
     private Integer price;
     private Integer stockQuantity;
