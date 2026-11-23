@@ -44,6 +44,22 @@ public class CartController {
         if (userId == null) {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
+
+        // 1. 전달된 ID 개수 카운트
+        int idCount = 0;
+        if (request.getProductId() != null) idCount++;
+        if (request.getManualBuildId() != null) idCount++;
+        if (request.getAutoBuildId() != null) idCount++;
+        // 아무것도 안 보낸 경우 차단
+        if (idCount == 0) {
+            throw new ResourceNotFoundException("추가할 상품 정보가 없습니다.");
+        }
+
+        // 2개 이상의 id를 받았을 경우 차단
+        if (idCount > 1) {
+            throw new InvalidStateException("일반 상품, 수동 빌드, 자동 추천 빌드 중 정확히 1종류만 지정해야 합니다.");
+        }
+
         if (request.getProductId() == null && request.getManualBuildId() == null && request.getAutoBuildId() == null) {
             throw new ResourceNotFoundException("추가할 상품 정보가 없습니다.");
         }
