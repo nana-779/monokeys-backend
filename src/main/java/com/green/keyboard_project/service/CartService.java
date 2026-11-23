@@ -189,13 +189,13 @@ public class CartService {
             Product product = findProduct(request.getProductId());
             validateOnSale(product);
             if (quantity > product.getStockQuantity()) {
-                throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+                throw new InvalidStateException(product.getName() + "의 현재 재고수는 " + product.getStockQuantity() + "개 입니다.");
             }
             Optional<CartItem> existing = cartItemRepository.findByUserAndProduct(user, product);
             if (existing.isPresent()) {
                 CartItem item = existing.get();
                 if (item.getQuantity() + quantity > product.getStockQuantity()) {
-                    throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+                    throw new InvalidStateException(product.getName() + "의 현재 재고수는 " + product.getStockQuantity() + "개 입니다.");
                 }
                 item.setQuantity(item.getQuantity() + quantity);
                 item.setUpdatedAt(LocalDateTime.now());
@@ -220,7 +220,7 @@ public class CartService {
     public void updateCartItemQuantity(int userId, int targetId, int quantity) {
         User user = findUser(userId);
         if (quantity <= 0) {
-            throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+            throw new InvalidStateException("1개 이상의 상품만 추가할 수 있습니다.");
         }
         // 1. cartItemId로 우선 조회, 없으면 productId로 조회
         CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
@@ -228,9 +228,10 @@ public class CartService {
                         .flatMap(product -> cartItemRepository.findByUserAndProduct(user, product))
                         .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다.")));
         if (item.getProduct() != null) {
-            validateOnSale(item.getProduct());
-            if (quantity > item.getProduct().getStockQuantity()) {
-                throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+            Product product = item.getProduct();
+            validateOnSale(product);
+            if (quantity > product.getStockQuantity()) {
+                throw new InvalidStateException("재고가 부족합니다.");
             }
         }
         item.setQuantity(quantity);
