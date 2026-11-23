@@ -5,8 +5,11 @@ import com.green.keyboard_project.dto.product.ProductListResponseDto;
 import com.green.keyboard_project.dto.product.ProductResponseDto;
 import com.green.keyboard_project.service.ProductService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/products")
@@ -15,14 +18,25 @@ public class ProductController {
 
     private final ProductService productService;
 
+    @GetMapping("/search-suggestions")
+    public ResponseEntity<ApiResponse<List<String>>> getSearchSuggestions(
+            @RequestParam(name = "limit", defaultValue = "6") int limit
+    ) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(ApiResponse.ok(productService.getSearchSuggestions(limit)));
+    }
+
     @GetMapping
     public ResponseEntity<ApiResponse<ProductListResponseDto>> getProducts(
             @RequestParam(name = "category", required = false) String category,
             @RequestParam(name = "subcategory", required = false) String subcategory,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "sort", required = false) String sort,
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "16") int size
     ) {
-        ProductListResponseDto response = productService.getProducts(category, subcategory, page, size);
+        ProductListResponseDto response = productService.getProducts(category, subcategory, keyword, sort, page, size);
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 
