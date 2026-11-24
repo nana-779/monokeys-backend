@@ -71,6 +71,31 @@ public class BuildService {
                 includeAssembly
         );
         User owner = resolveActorUser(userId);
+
+        // 이미 똑같은 부품 4개 조합으로 만든 빌드가 있다면 새로 INSERT하지 않고 기존 것 반환
+        if (owner != null) {
+            Set<Integer> targetIds = Set.of(
+                    request.getHousingProductId(),
+                    request.getPcbProductId(),
+                    request.getSwitchProductId(),
+                    request.getKeycapProductId()
+            );
+            List<ManualBuild> userBuilds = manualBuildRepository.findByUser_UserId(owner.getUserId());
+            for (ManualBuild mb : userBuilds) {
+                if (mb.isIncludeAssembly() == includeAssembly) {
+                    Set<Integer> existIds = manualBuildItemRepository
+                            .findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(mb.getManualBuildId())
+                            .stream()
+                            .map(i -> i.getProduct().getProductId())
+                            .collect(Collectors.toSet());
+                    if (existIds.equals(targetIds)) {
+                        return toManualBuildResponse(mb, validated.toItemDtos(), false); // 기존 빌드 재사용
+                    }
+                }
+            }
+        }
+
+        // 일치하는 기존 빌드가 없을 때만 신규 INSERT
         return persistNewManualBuild(owner, normalizeName(request.getBuildName(), DEFAULT_MANUAL_BUILD_NAME), validated, false);
     }
 
@@ -184,6 +209,29 @@ public class BuildService {
                 includeAssembly
         );
         User owner = resolveActorUser(userId);
+
+        if (owner != null) {
+            Set<Integer> targetIds = Set.of(
+                    request.getHousingProductId(),
+                    request.getPcbProductId(),
+                    request.getSwitchProductId(),
+                    request.getKeycapProductId()
+            );
+            List<AutoBuild> userBuilds = autoBuildRepository.findByUser_UserId(owner.getUserId());
+            for (AutoBuild ab : userBuilds) {
+                if (ab.isIncludeAssembly() == includeAssembly) {
+                    Set<Integer> existIds = autoBuildItemRepository
+                            .findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(ab.getAutoBuildId())
+                            .stream()
+                            .map(i -> i.getProduct().getProductId())
+                            .collect(Collectors.toSet());
+                    if (existIds.equals(targetIds)) {
+                        return toAutoBuildResponse(ab, validated.toItemDtos(), false);
+                    }
+                }
+            }
+        }
+
         return persistNewAutoBuild(owner, normalizeName(request.getBuildName(), DEFAULT_AUTO_BUILD_NAME), request, validated, false);
     }
 
