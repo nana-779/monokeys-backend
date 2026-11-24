@@ -1,5 +1,7 @@
 package com.green.keyboard_project.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.green.keyboard_project.dto.cart.CartAddRequest;
 import com.green.keyboard_project.dto.cart.CartItemResponse;
 import com.green.keyboard_project.entity.*;
@@ -24,6 +26,7 @@ import java.util.function.Consumer;
 @Service
 @RequiredArgsConstructor
 public class CartService {
+
     private final CartItemRepository cartItemRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
@@ -32,6 +35,7 @@ public class CartService {
     private final ManualBuildItemRepository manualBuildItemRepository;
     private final AutoBuildItemRepository autoBuildItemRepository;
     private final OrderItemRepository orderItemRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 회원의 장바구니 목록 조회 (GET /api/cart)
@@ -44,10 +48,12 @@ public class CartService {
                     .cartItemId(item.getCartItemId())
                     .userId(userId)
                     .quantity(item.getQuantity());
+
             Product product = item.getProduct();
             ManualBuild manualBuild = item.getManualBuild();
             AutoBuild autoBuild = item.getAutoBuild();
-            // [A] 일반 단품 상품
+
+            // [A] 일반 단품 및 커스텀 키캡 상품
             if (product != null) {
                 int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), item.getCartItemId());
                 int remainingStock = Math.max(0, product.getStockQuantity() - usedByOthers);
@@ -56,8 +62,10 @@ public class CartService {
                         .price(product.getBasePrice())
                         .stockQuantity(remainingStock)
                         .thumbnailUrl(product.getThumbnailUrl())
+                        .customDesignData(item.getCustomDesignData())
                         .build();
             }
+
             // [B] 수동 커스텀 키보드 빌드
             if (manualBuild != null) {
                 List<Product> parts = getManualBuildProducts(manualBuild.getManualBuildId());
@@ -69,6 +77,7 @@ public class CartService {
                         .includeAssembly(manualBuild.isIncludeAssembly())
                         .build();
             }
+
             // [C] 자동 추천 키보드 빌드
             if (autoBuild != null) {
                 List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
@@ -80,6 +89,7 @@ public class CartService {
                         .includeAssembly(autoBuild.isIncludeAssembly())
                         .build();
             }
+
             return builder.build();
         }).toList();
     }
@@ -91,7 +101,8 @@ public class CartService {
     public void addCartItem(int userId, CartAddRequest request) {
         User user = findUser(userId);
         int quantity = (request.getQuantity() != null && request.getQuantity() > 0) ? request.getQuantity() : 1;
-        // [A] 수동 커스텀 빌드 저장
+
+        // [A] 수동 커스텀 키보드 빌드 저장
         if (request.getManualBuildId() != null) {
             ManualBuild manualBuild = manualBuildRepository.findById(request.getManualBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("커스텀 빌드를 찾을 수 없습니다."));
@@ -105,7 +116,8 @@ public class CartService {
             addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setManualBuild(manualBuild));
             return;
         }
-        // [B] 자동 추천 빌드 저장
+
+        // [B] 자동 추천 키보드 빌드 저장
         if (request.getAutoBuildId() != null) {
             AutoBuild autoBuild = autoBuildRepository.findById(request.getAutoBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("추천 빌드를 찾을 수 없습니다."));
@@ -113,41 +125,59 @@ public class CartService {
             if (autoBuild.getUser() != null && autoBuild.getUser().getUserId() != user.getUserId()) {
                 throw new InvalidStateException("본인이 생성한 커스텀 빌드만 장바구니에 담을 수 있습니다.");
             }
-            
+
             List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
             Optional<CartItem> existing = cartItemRepository.findByUserAndAutoBuild(user, autoBuild);
             addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setAutoBuild(autoBuild));
             return;
         }
-        // [C] 일반 단품 상품 저장
+
+        // [C] 상품 (일반 단품 및 커스텀 키캡) 저장
         if (request.getProductId() != null) {
             Product product = findProduct(request.getProductId());
             validateOnSale(product);
-            Optional<CartItem> existingItem = cartItemRepository.findByUserAndProduct(user, product);
+
+            String requestDesign = (request.getCustomDesignData() != null && !request.getCustomDesignData().isBlank())
+                    ? request.getCustomDesignData().trim() : null;
+
+            // 1. 해당 유저가 담은 이 상품(product)의 모든 장바구니 항목 조회
+            List<CartItem> userProductItems = cartItemRepository.findAllByUserAndProduct(user, product);
+
+            // 2. 동일한 디자인(또는 둘 다 디자인 없는 일반 상품)인지 확인
+            Optional<CartItem> existingItem = userProductItems.stream()
+                    .filter(item -> isSameDesign(requestDesign, item.getCustomDesignData()))
+                    .findFirst();
+
+            // 3. 재고 계산 (현재 항목 수정 시 자기 자신 제외하고 잔여 재고 계산)
             Integer excludeId = existingItem.map(CartItem::getCartItemId).orElse(null);
             int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), excludeId);
             int availableStock = Math.max(0, product.getStockQuantity() - usedByOthers);
-            // 최대 재고수가 0개이면 바로 담기 거부
+
             if (availableStock <= 0) {
-                throw new InvalidStateException("해당 상품은 현재 품절(또는 커스텀 키보드 부품으로 소진)되어 장바구니에 담을 수 없습니다.");
+                throw new InvalidStateException("해당 상품은 현재 품절(또는 커스텀 상품/키보드로 소진)되어 장바구니에 담을 수 없습니다.");
             }
+
             int currentQty = existingItem.map(CartItem::getQuantity).orElse(0);
-            // 이미 최대치만큼 담겨 있으면 추가 거부
             if (currentQty >= availableStock) {
-                throw new InvalidStateException(
-                        "커스텀 키보드에 포함된 수량(" + usedByOthers + "개)으로 인해 이미 최대 수량(" + availableStock + "개)만큼 담겨 있습니다."
-                );
+                throw new InvalidStateException("이미 최대 주문 가능 수량(" + availableStock + "개)만큼 담겨 있습니다.");
             }
-            // 재고 초과 시 자동으로 남은 최대 재고수로 보정
+
             int finalQuantity = Math.min(currentQty + quantity, availableStock);
+
             if (existingItem.isPresent()) {
+                // [동일 디자인 존재 -> 기존 행의 수량만 증가!]
                 CartItem item = existingItem.get();
                 item.setQuantity(finalQuantity);
+                if (requestDesign != null) {
+                    item.setCustomDesignData(requestDesign); // 최신 이미지 URL 등으로 갱신
+                }
                 item.setUpdatedAt(LocalDateTime.now());
             } else {
+                // [새로운 디자인 또는 최초 등록 -> 신규 행 생성!]
                 CartItem newItem = new CartItem();
                 newItem.setUser(user);
                 newItem.setProduct(product);
+                newItem.setCustomDesignData(requestDesign);
                 newItem.setQuantity(finalQuantity);
                 newItem.setCreatedAt(LocalDateTime.now());
                 newItem.setUpdatedAt(LocalDateTime.now());
@@ -155,6 +185,7 @@ public class CartService {
             }
             return;
         }
+
         throw new ResourceNotFoundException("추가할 상품 정보가 올바르지 않습니다.");
     }
 
@@ -167,10 +198,11 @@ public class CartService {
         if (quantity <= 0) {
             throw new InvalidStateException("1개 이상의 수량만 지정할 수 있습니다.");
         }
-        // cartItemId로 직접 조회 (없으면 예외)
+
         CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
                 .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다."));
-        // 단품 상품 수량 변경 검증
+
+        // 단품 및 커스텀 키캡 수량 변경 검증
         if (item.getProduct() != null) {
             Product product = item.getProduct();
             validateOnSale(product);
@@ -194,7 +226,7 @@ public class CartService {
                 quantity = availableStock;
             }
         }
-        // 검증 통과 시 수량 업데이트
+
         item.setQuantity(quantity);
         item.setUpdatedAt(LocalDateTime.now());
     }
@@ -205,7 +237,6 @@ public class CartService {
     @Transactional
     public void removeCartItem(int userId, int targetId) {
         User user = findUser(userId);
-        // cartItemId로 조회 후 삭제 (없으면 예외)
         CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
                 .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다."));
         deleteCartItemAndOrphanBuild(item);
@@ -224,15 +255,46 @@ public class CartService {
     }
 
     /**
+     * 커스텀 키캡 디자인 일치 여부 비교 헬퍼 메서드
+     * (이미지 URL의 UUID 난수를 제외한 핵심 디자인 속성들을 비교)
+     */
+    private boolean isSameDesign(String designA, String designB) {
+        if (Objects.equals(designA, designB)) {
+            return true;
+        }
+        if (designA == null || designB == null || designA.isBlank() || designB.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode nodeA = objectMapper.readTree(designA);
+            JsonNode nodeB = objectMapper.readTree(designB);
+
+            if (nodeA.has("keyType") || nodeA.has("customText") || nodeA.has("textLayers")) {
+                boolean keyTypeMatch = Objects.equals(nodeA.path("keyType").asText(null), nodeB.path("keyType").asText(null));
+                boolean keySizeMatch = Objects.equals(nodeA.path("keySize").asText(null), nodeB.path("keySize").asText(null));
+                boolean baseColorMatch = Objects.equals(nodeA.path("baseColor").asText(null), nodeB.path("baseColor").asText(null));
+                boolean bgColorMatch = Objects.equals(nodeA.path("backgroundColor").asText(null), nodeB.path("backgroundColor").asText(null));
+                boolean textMatch = Objects.equals(nodeA.path("customText").asText(null), nodeB.path("customText").asText(null));
+                boolean textLayersMatch = Objects.equals(nodeA.path("textLayers"), nodeB.path("textLayers"));
+
+                return keyTypeMatch && keySizeMatch && baseColorMatch && bgColorMatch && textMatch && textLayersMatch;
+            }
+            return nodeA.equals(nodeB);
+        } catch (Exception e) {
+            return Objects.equals(designA.trim(), designB.trim());
+        }
+    }
+
+    /**
      * 장바구니 항목 삭제 시, 커스텀 빌드와 부품 목록 테이블까지 연쇄 정리 삭제
      */
     private void deleteCartItemAndOrphanBuild(CartItem item) {
         ManualBuild mb = item.getManualBuild();
         AutoBuild ab = item.getAutoBuild();
-        // 장바구니 행 먼저 삭제 후 즉시 DB 반영
+
         cartItemRepository.delete(item);
         cartItemRepository.flush();
-        // 수동 커스텀 빌드: 주문 및 다른 장바구니에서 쓰이지 않는 경우 고아 빌드 데이터 완전 삭제
+
         if (mb != null) {
             int mbId = mb.getManualBuildId();
             boolean usedInOtherCart = cartItemRepository.existsByManualBuild_ManualBuildId(mbId);
@@ -243,7 +305,7 @@ public class CartService {
                 manualBuildRepository.delete(mb);
             }
         }
-        // 자동 추천 커스텀 빌드: 주문 및 다른 장바구니에서 쓰이지 않는 경우 고아 빌드 데이터 완전 삭제
+
         if (ab != null) {
             int abId = ab.getAutoBuildId();
             boolean usedInOtherCart = cartItemRepository.existsByAutoBuild_AutoBuildId(abId);
@@ -263,23 +325,21 @@ public class CartService {
                                       int quantity, Consumer<CartItem> buildSetter) {
         Integer excludeId = existing.map(CartItem::getCartItemId).orElse(null);
         int availableStock = calculateAvailableStockForParts(user.getUserId(), parts, excludeId);
-        // 최대 재고수가 0개이면 바로 담기 거부
+
         if (availableStock <= 0) {
             throw new InvalidStateException("부품 재고가 부족하여 커스텀 키보드를 담을 수 없습니다.");
         }
+
         if (existing.isPresent()) {
             CartItem item = existing.get();
             int currentQty = item.getQuantity();
-            // 이미 최대치만큼 담겨 있으면 추가 거부
             if (currentQty >= availableStock) {
                 throw new InvalidStateException("부품 재고 부족으로 이미 최대 수량(" + availableStock + "개)만큼 담겨 있습니다.");
             }
-            // 재고 초과 시 자동으로 남은 최대 재고수로 보정
             int finalQuantity = Math.min(currentQty + quantity, availableStock);
             item.setQuantity(finalQuantity);
             item.setUpdatedAt(LocalDateTime.now());
         } else {
-            // 신규 담기 시에도 최대치로 자동 보정
             int finalQuantity = Math.min(quantity, availableStock);
             CartItem newItem = new CartItem();
             newItem.setUser(user);
@@ -359,22 +419,17 @@ public class CartService {
 
     /**
      * 현재 사용자의 장바구니에서 특정 상품(부품)이 사용 중인 총 수량 계산 (일반 단품 + 커스텀 키보드 부품 모두 포함)
-     * @param excludeCartItemId 수정/조회 중인 자기 자신 항목의 cartItemId (신규 추가 시에는 null)
      */
     private int getUsedQuantityInCart(int userId, int productId, Integer excludeCartItemId) {
         List<CartItem> userItems = cartItemRepository.findByUser_UserId(userId);
         int totalUsed = 0;
         for (CartItem item : userItems) {
-            // 자기 자신 항목은 제외 (현재 항목의 수량을 변경하거나 조회할 때 중복 차감 방지)
             if (excludeCartItemId != null && item.getCartItemId() == excludeCartItemId) {
                 continue;
             }
-            // 1. 일반 단품으로 담겨 있는 수량 합산
             if (item.getProduct() != null && item.getProduct().getProductId() == productId) {
                 totalUsed += item.getQuantity();
-            }
-            // 2. 커스텀 키보드(수동/자동)에 부품으로 들어간 수량 합산
-            else if (item.getManualBuild() != null || item.getAutoBuild() != null) {
+            } else if (item.getManualBuild() != null || item.getAutoBuild() != null) {
                 boolean contains = getBuildProducts(item).stream()
                         .anyMatch(p -> p.getProductId() == productId);
                 if (contains) {
@@ -400,6 +455,7 @@ public class CartService {
                     return new ResourceNotFoundException("상품을 찾을 수 없습니다.");
                 });
     }
+
     private void validateOnSale(Product product) {
         if (!product.isActive() || product.isDeleted()) {
             log.warn("판매하지 않는 상품 장바구니 요청. productId={}", product.getProductId());

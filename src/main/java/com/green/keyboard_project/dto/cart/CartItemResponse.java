@@ -28,6 +28,7 @@ public class CartItemResponse {
     private Integer stockQuantity;
     private Integer quantity;
     private String thumbnailUrl;
+    private String customDesignData;
     private Boolean includeAssembly;
     private List<Integer> partProductIds;
 }
