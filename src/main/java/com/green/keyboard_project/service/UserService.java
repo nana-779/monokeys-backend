@@ -1,5 +1,6 @@
 package com.green.keyboard_project.service;
 
+import com.green.keyboard_project.dto.PasswordChangeRequest;
 import com.green.keyboard_project.dto.ProfileUpdateRequest;
 import com.green.keyboard_project.dto.SignupRequest;
 import com.green.keyboard_project.dto.SignupResponse;
@@ -153,6 +154,20 @@ public class UserService {
             address.setDetailAddress(request.detailAddress());
         }
         return UserResponse.from(user, address);
+    }
+
+    // 비밀번호 변경: 현재 비밀번호를 확인한 뒤 바꾸고, Refresh Token을 지워 새 비밀번호로 다시 로그인하게 합니다.
+    // 탈퇴와 같은 본인 확인(requirePasswordMember)과 토큰 삭제(revokeRefreshTokens)를 재사용합니다.
+    @Transactional
+    public void changePassword(int userId, PasswordChangeRequest request) {
+        User user = users.findById(userId).orElseThrow(UserService::inactive);
+        WithdrawalAuth auth = requirePasswordMember(user);
+        if (!passwords.matches(request.currentPassword(), user.getPassword())) {
+            throw new AuthorizationFailureException("현재 비밀번호가 일치하지 않습니다.");
+        }
+        user.setPassword(passwords.encode(request.newPassword()));
+        user.setUpdatedAt(now());
+        auth.revokeRefreshTokens(userId);
     }
 
     private WithdrawalAuth requirePasswordMember(User user) {

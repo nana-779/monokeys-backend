@@ -115,4 +115,29 @@ public class UserController {
                 )
         );
     }
+
+    // 비밀번호 변경
+    @PatchMapping("/api/users/me/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @AuthenticationPrincipal Integer userId,
+            @Valid @RequestBody PasswordChangeRequest request
+    ) {
+        // 비밀번호 변경 처리
+        users.changePassword(
+                userId(userId),
+                request
+        );
+
+        // 변경 성공 시 Access / Refresh 쿠키 만료 (새 비밀번호로 다시 로그인)
+        return ResponseEntity.ok()
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        cookies.expiredAccessCookie().toString()
+                )
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        cookies.expiredRefreshCookie().toString()
+                )
+                .body(ApiResponse.ok());
+    }
 }
