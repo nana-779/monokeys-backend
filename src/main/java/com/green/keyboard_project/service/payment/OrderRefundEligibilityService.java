@@ -1,5 +1,7 @@
 package com.green.keyboard_project.service.payment;
 
+import static com.green.keyboard_project.entity.OrderDelivery.DeliveryStatusType.PREPARING;
+
 import com.green.keyboard_project.dto.payment.OrderRefundPreview;
 import com.green.keyboard_project.dto.payment.OrderRefundPreview.Status;
 import com.green.keyboard_project.entity.Order;
@@ -96,9 +98,9 @@ public class OrderRefundEligibilityService {
         } else if (order.getOrderStatus() != OrderStatusType.ORDERED || payment.getPaymentMethod() == null) {
             status = Status.POLICY_REVIEW_REQUIRED;
             message = "현재 주문 상태와 결제수단의 취소 조건을 확인해야 합니다.";
-        } else if (deliveries.existsByOrder_OrderId(order.getOrderId())) {
+        } else if (deliveries.existsByOrder_OrderIdAndDeliveryStatusNot(order.getOrderId(), PREPARING)) {
             status = Status.POLICY_REVIEW_REQUIRED;
-            message = "배송 기록이 있어 배송 상태별 취소 정책을 확인해야 합니다.";
+            message = "발송된 주문은 취소할 수 없습니다.";
         } else {
             // 주문 품목이 없거나 조립 품목이 섞인 주문에는 일반상품 전액 환불 기준을 적용하지 않습니다.
             if (orderItems.isEmpty()) {

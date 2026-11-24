@@ -1,5 +1,7 @@
 package com.green.keyboard_project.service.payment;
 
+import static com.green.keyboard_project.entity.OrderDelivery.DeliveryStatusType.PREPARING;
+
 import com.green.keyboard_project.dto.payment.OrderCancellationRequest;
 import com.green.keyboard_project.entity.Order;
 import com.green.keyboard_project.entity.Order.OrderStatusType;
@@ -172,8 +174,8 @@ public class OrderCancellationStore {
             throw conflict("REFUND_IN_PROGRESS", "처리 중인 환불의 결과를 먼저 확인해 주세요.");
         }
         int remaining = remainingBalance(payment.getPaidAmount(), history);
-        if (deliveries.existsByOrder_OrderId(order.getOrderId())) {
-            throw conflict("DELIVERY_REVIEW_REQUIRED", "배송 기록이 있는 주문은 취소 정책 확인이 필요합니다.");
+        if (deliveries.existsByOrder_OrderIdAndDeliveryStatusNot(order.getOrderId(), PREPARING)) {
+            throw conflict("DELIVERY_REVIEW_REQUIRED", "발송된 주문은 취소할 수 없습니다.");
         }
         var lines = items.findByOrder(order);
         if (lines.isEmpty() || lines.stream().anyMatch(line -> line.getProduct() == null

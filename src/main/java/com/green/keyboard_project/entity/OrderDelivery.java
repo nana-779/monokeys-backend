@@ -35,9 +35,6 @@ public class OrderDelivery {
     @Column(name = "tracking_number", nullable = true, length = 100)
     private String trackingNumber;
 
-    @Column(name = "delivery_memo", nullable = true, length = 255)
-    private String deliveryMemo;
-
     @Column(name = "shipped_at", nullable = true)
     private LocalDateTime shippedAt;
 

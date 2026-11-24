@@ -68,6 +68,9 @@ public class Order {
     @Column(name = "detail_address", nullable = false, length = 255)
     private String detailAddress;
 
+    @Column(name = "delivery_memo", length = 255)
+    private String deliveryMemo;
+
     public enum OrderStatusType {
         PENDING, ORDERED, CANCELLED, CONFIRMED
     }

@@ -3,9 +3,28 @@ package com.green.keyboard_project.repository.orders;
 import com.green.keyboard_project.entity.OrderDelivery;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import com.green.keyboard_project.entity.OrderDelivery.DeliveryStatusType;
 
 @Repository
 public interface OrderDeliveryRepository extends JpaRepository<OrderDelivery, Integer> {
-    // 배송 정책이 확정될 때까지 배송 기록이 있는지만 조회합니다.
-    boolean existsByOrder_OrderId(int orderId);
+    boolean existsByOrder_OrderIdAndDeliveryStatusNot(int orderId, DeliveryStatusType status);
+
+    @Modifying
+    @Query(value = """
+            UPDATE order_delivery SET delivery_status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP
+            WHERE delivery_status = 'SHIPPING' AND order_id IN
+                (SELECT order_id FROM orders WHERE order_number = :orderNumber AND user_id = :userId
+                 AND order_status IN ('ORDERED','CONFIRMED'))
+            """, nativeQuery = true)
+    int confirmMyDelivery(String orderNumber, int userId);
+
+    @Modifying
+    @Query(value = """
+            UPDATE order_delivery SET delivery_status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP
+            WHERE delivery_status = 'SHIPPING' AND shipped_at <= TIMESTAMPADD(DAY, -14, CURRENT_TIMESTAMP)
+              AND order_id IN (SELECT order_id FROM orders WHERE order_status IN ('ORDERED','CONFIRMED'))
+            """, nativeQuery = true)
+    int completeOverdueDeliveries();
 }
