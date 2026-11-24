@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
-@Table(name = "refund")
+@Table(name = "refund", uniqueConstraints = @UniqueConstraint(name = "uq_refund_pg_cancel_tid",
+        columnNames = "pg_cancel_tid"))
 public class Refund {
 
     @Id
@@ -35,7 +36,7 @@ public class Refund {
     @Enumerated(EnumType.STRING)
     private RefundStatusType status;
 
-    @Column(name = "pg_cancel_tid", nullable = true, length = 100)
+    @Column(name = "pg_cancel_tid", nullable = true, length = 200)
     private String pgCancelTid;
 
     @Column(name = "requested_at", nullable = false)

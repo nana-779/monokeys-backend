@@ -25,7 +25,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleUploadTooLarge(MaxUploadSizeExceededException e) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(ApiResponse.fail("이미지 용량은 5MB 이하만 업로드할 수 있습니다."));
+                .body(ApiResponse.fail("업로드 가능한 최대 이미지 용량(10MB)을 초과했습니다."));
     }
 
     @ExceptionHandler(InvalidProductImageException.class)

@@ -163,3 +163,54 @@ paymentStatus, completed, method, approvedAt, storage를 포함합니다. paymen
 - https://docs.tosspayments.com/reference
 - https://docs.tosspayments.com/reference/using-api/authorization
 - https://docs.tosspayments.com/reference/using-api/api-keys
+
+## 회원 주문 환불 사전 확인
+
+`GET /api/payments/orders/{orderNumber}/refund/eligibility`는 로그인한 회원의 주문과 로컬 결제·환불 기록을 조회합니다. 없는 주문과 다른 회원의 주문은 같은 404로 응답합니다. 응답에는 결제 키·회원 개인정보가 포함되지 않습니다.
+
+- `PRECHECK_PASSED`는 로컬에서 일반상품 전액 취소의 사전 조건을 충족했다는 뜻입니다. `BLOCKED`는 결제 미완료, 진행 중인 환불, 이미 완료된 취소 또는 로컬 데이터 불일치를 나타냅니다. `POLICY_REVIEW_REQUIRED`는 배송, 조립상품, 가상계좌, 이전 부분 취소처럼 정책을 확인해야 하는 경우에 반환합니다.
+- 잔액은 저장된 결제금액에서 완료 상태의 환불금액만 차감한 값입니다. Toss의 실제 잔액과 취소 가능 여부는 이후 실행 단계에서 다시 확인해야 합니다. 이 조회는 데이터 변경이나 Toss 호출을 수행하지 않습니다.
+- 후속 취소 연동은 기존 서버 전용 `TOSS_PAYMENTS_SECRET_KEY` 참조와 테스트 키 검증을 재사용합니다. 테스트 연결은 로컬 프로필과 관련 테스트 플래그를 적용하며, 운영 키는 테스트 클라이언트에서 거절합니다.
+- 실행 단계에서 동일 요청을 다시 확인할 때는 같은 `Idempotency-Key`를 사용합니다. 확정 거절과 결과 미확정을 구분하고, 타임아웃이나 처리 중 응답에서는 새 멱등키로 취소를 반복하기 전에 Toss 상태를 확인합니다.
+- 부분 취소는 Toss 잔액과 `isPartialCancelable` 및 팀 정책을 확인해야 합니다. 가상계좌 입금 전에는 전액 취소만 가능하고 입금 후에는 환불계좌가 필요합니다.
+
+[Toss 결제 취소 가이드](https://docs.tosspayments.com/guides/v2/cancel-payment) · [인증 및 멱등키](https://docs.tosspayments.com/reference/using-api/authorization)
+
+## 회원 결제 취소 5~8단계
+
+- `POST /api/payments/orders/{orderNumber}/refund/cancel`은 로그인 쿠키와 설정된 프론트 `Origin`을 요구합니다. 본인 주문번호로 결제를 조회하며 결제 키는 서버에서 가져옵니다. 요청은 `mode`, `cancelReason`, `expectedRemainingAmount`, 부분 취소의 `cancelAmount`를 사용합니다. `expectedRemainingAmount`는 회원이 확인한 잔액입니다. 부분 취소가 확정되면 이 값이 달라지므로 동일 입력으로 다시 차감되지 않습니다. 잔여 금액 전체를 취소하려면 `FULL`을 사용합니다.
+- 취소 흐름은 결제사의 상태를 조회한 뒤 짧은 DB 트랜잭션에서 결제 행을 잠그고 환불 행을 `REQUESTED`로 커밋합니다. 잠금을 해제한 후에 PG 요청을 보내며, 이후 요청은 진행 중인 행을 확인합니다. Toss 멱등키와 취소 사유의 요청 식별자는 예약한 환불 행을 기준으로 고정합니다.
+- 응답의 주문·결제 키·통화·최초 금액·잔액·상태·취소 거래 식별자가 맞으면 환불 행의 금액과 거래 정보를 확정합니다. 결과를 확인하기 어렵거나 DB 저장에 실패하면 `202 PENDING_CONFIRMATION`으로 응답합니다. `POST .../refund/reconcile`은 본인 주문의 진행 중 환불을 Toss GET으로 대사합니다. Toss가 취소를 확정한 시점과 고객 결제수단에 환불금이 반영되는 시점은 다릅니다.
+- Toss 취소 클라이언트는 기존 서버 전용 테스트 인증 객체를 사용합니다. 미입금 가상계좌는 계좌 없이 전액 취소하는 규칙을 적용하고, 입금 확인 후에는 Toss에만 환불계좌를 전송하는 규칙을 준비했습니다. 환불계좌는 로그·응답·DB에 보관하지 않습니다.
+- 현재 결제 승인 코드가 가상계좌 입금 대기를 `PAID`로 저장하므로 회원 API에서 가상계좌를 차단합니다. 배송 기록과 조립상품도 팀 정책 확인이 필요합니다.
+- **현재 구성에서는 실제 Toss 취소 클라이언트를 Spring에 등록하지 않으며**, 입력 및 본인 주문 검증을 통과한 요청도 `503 CANCELLATION_NOT_ENABLED`로 끝납니다. 프론트의 실행 버튼도 비활성 상태입니다. 기존 주문·결제·배송·재고 상태와 상품별 부분 환불은 담당자 합의 후 연결합니다. 환불 기록과 주문 상태가 함께 정리되는 흐름을 검증한 뒤 별도 승인으로 활성화합니다.
+
+[Toss 결제 취소 API](https://docs.tosspayments.com/reference#결제-취소) · [Toss 결제 취소 가이드](https://docs.tosspayments.com/guides/v2/cancel-payment)
+
+## 회원 환불 내역과 결과 저장 8~12단계
+
+본인 주문 화면은 `GET /api/payments/orders/{orderNumber}/refund/history`에서 로컬 환불 이력을 읽습니다. 완료된 취소 금액만 합산하고 처리 중·거절된 요청은 별도로 표시합니다. 부분 취소는 거래별로 보존하며, 잔액을 소진한 마지막 완료 거래를 잔액 전액 취소로 표시합니다. 거래 정보에는 결제 키, 취소 거래 키, 환불계좌가 포함되지 않습니다.
+
+취소 결과 저장 트랜잭션은 결제 행을 잠그고 요청 금액과 거래 키를 검증합니다. 같은 환불 행에 이미 기록된 거래는 재확정할 수 있고, 다른 행에 같은 거래 키를 저장하는 요청은 애플리케이션 조회와 기존 `uq_refund_pg_cancel_tid`로 막습니다. 부분 취소 후 결제는 `PAID`, 잔액이 0이면 결제는 `CANCELLED`로 저장합니다. 주문·배송·재고 상태 연동은 각 담당자가 정책을 합의한 뒤 진행합니다.
+
+분류한 Toss 오류는 내부 코드로 응답하고, 로그에는 주문번호·환불 요청 번호·코드·처리 상태를 Logger 시각과 함께 남깁니다. 원본 응답과 인증 정보, 계좌번호, 예금주, 취소 사유는 로그에 남기지 않습니다. 조회 화면의 과거 실패 이력에는 저장된 요청 사유와 거절 상태를 표시합니다.
+
+### 보류된 데이터 변경
+
+일반상품 취소 금액·상태·거래별 이력의 저장에 새 스키마는 필요하지 않습니다. 과거 거절 건마다 결제사 오류를 별도 표기해야 한다면 문자열 원문 대신 정규화된 내부 오류 코드만 저장하는 다음 초안을 검토합니다.
+
+```sql
+ALTER TABLE refund ADD COLUMN failure_code VARCHAR(64) NULL;
+-- 롤백 초안
+ALTER TABLE refund DROP COLUMN failure_code;
+```
+
+기존 행은 NULL을 유지하므로 추정으로 실패 사유를 채우지 않습니다. 롤백하면 새 코드 이력만 없어집니다. 이 초안은 적용하지 않았습니다.
+
+### 가상계좌와 운영 대사
+
+Toss의 주문서형·결제창형은 관리자 설정으로 환불계좌 입력 UI를 제공하며, 결제창을 띄운 시점부터 30분간 승인 응답의 `virtualAccount.refundReceiveAccount`를 받을 수 있습니다. 취소 요청 시점에는 이 정보가 필요할 때 다시 입력받아 서버에서 한 번 전달하는 방안을 우선 검토합니다. 장기 저장이 필요해지면 별도 보관 기간과 접근 통제를 합의합니다. PG 취소 확인과 실제 계좌 입금은 별개의 상태입니다.
+
+현재 회원 가상계좌는 미입금과 입금 완료를 신뢰성 있게 구분할 수 없습니다. 결제 상태 연동이 확정될 때까지 가상계좌 취소를 차단합니다. 실제 클라이언트와 UI 실행 버튼도 비활성 상태입니다. 결과가 미확정인 환불은 동일한 저장 요청을 기준으로 Toss 조회로 대사합니다. 거래를 특정할 수 없으면 요청을 진행 상태로 남기고 담당자가 PG 내역을 대조합니다.
+
+[Toss 가상계좌 취소·환불 계좌](https://docs.tosspayments.com/guides/v2/cancel-payment) · [Toss 오류 코드](https://docs.tosspayments.com/reference/error-codes)

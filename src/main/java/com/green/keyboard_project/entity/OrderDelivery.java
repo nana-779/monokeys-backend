@@ -35,21 +35,6 @@ public class OrderDelivery {
     @Column(name = "tracking_number", nullable = true, length = 100)
     private String trackingNumber;
 
-    @Column(name = "recipient_name", nullable = false, length = 50)
-    private String recipientName;
-
-    @Column(name = "recipient_phone", nullable = false, length = 20)
-    private String recipientPhone;
-
-    @Column(name = "postal_code", nullable = false, length = 10)
-    private String postalCode;
-
-    @Column(name = "road_address", nullable = false, length = 255)
-    private String roadAddress;
-
-    @Column(name = "detail_address", nullable = false, length = 255)
-    private String detailAddress;
-
     @Column(name = "delivery_memo", nullable = true, length = 255)
     private String deliveryMemo;
 

@@ -14,20 +14,58 @@ import java.util.UUID;
 
 @Service
 public class ProductImageStorageService {
-    private static final long MAX_SIZE = 5L * 1024 * 1024;
+    private static final long PRODUCT_MAX_SIZE = 5L * 1024 * 1024;
+    private static final long CUSTOM_KEYCAP_MAX_SIZE = 10L * 1024 * 1024;
+    private static final String PRODUCTS_PREFIX = "/uploads/products/";
+    private static final String CUSTOM_KEYCAPS_PREFIX = "/uploads/custom-keycaps/";
+
     private final Path uploadDirectory;
+    private final Path customKeycapDirectory;
     private final String publicBaseUrl;
 
     public ProductImageStorageService(
             @Value("${app.upload.directory:./uploads/products}") String directory,
+            @Value("${app.upload.custom-keycap-directory:./uploads/custom-keycaps}") String customKeycapDirectory,
             @Value("${app.upload.public-base-url:http://localhost:8080}") String publicBaseUrl
     ) {
         this.uploadDirectory = Path.of(directory).toAbsolutePath().normalize();
+        this.customKeycapDirectory = Path.of(customKeycapDirectory).toAbsolutePath().normalize();
         this.publicBaseUrl = publicBaseUrl.replaceAll("/$", "");
     }
 
     public String store(MultipartFile file) {
-        if (file.getSize() > MAX_SIZE) throw new InvalidProductImageException("이미지 용량은 5MB 이하만 업로드할 수 있습니다.");
+        return storeInto(
+                file,
+                uploadDirectory,
+                PRODUCTS_PREFIX,
+                PRODUCT_MAX_SIZE,
+                "이미지 용량은 5MB 이하만 업로드할 수 있습니다."
+        );
+    }
+
+    public String storeCustomKeycap(MultipartFile file) {
+        return storeInto(
+                file,
+                customKeycapDirectory,
+                CUSTOM_KEYCAPS_PREFIX,
+                CUSTOM_KEYCAP_MAX_SIZE,
+                "커스텀 키캡 이미지는 10MB 이하만 업로드할 수 있습니다."
+        );
+    }
+
+    private String storeInto(
+            MultipartFile file,
+            Path targetDir,
+            String urlPrefix,
+            long maxSizeBytes,
+            String tooLargeMessage
+    ) {
+        if (file == null || file.isEmpty()) {
+            throw new InvalidProductImageException("업로드할 이미지 파일이 비어 있습니다.");
+        }
+        if (file.getSize() > maxSizeBytes) {
+            throw new InvalidProductImageException(tooLargeMessage);
+        }
         String extension = extension(file.getOriginalFilename());
         String contentType = file.getContentType();
         if (extension == null || contentType == null || !contentType.equalsIgnoreCase(mimeFor(extension))) {
@@ -38,27 +76,41 @@ public class ProductImageStorageService {
             if (!hasValidSignature(bytes, extension)) {
                 throw new InvalidProductImageException("이미지 파일 형식이 올바르지 않습니다.");
             }
-            Files.createDirectories(uploadDirectory);
+            Files.createDirectories(targetDir);
             String filename = UUID.randomUUID() + "." + extension;
-            Files.write(uploadDirectory.resolve(filename), bytes);
-            return publicBaseUrl + "/uploads/products/" + filename;
+            Files.write(targetDir.resolve(filename), bytes);
+            return publicBaseUrl + urlPrefix + filename;
         } catch (IOException e) {
             throw new IllegalStateException("이미지를 저장할 수 없습니다.", e);
         }
     }
 
     public void deleteByUrl(String url) {
-        if (url == null || !url.contains("/uploads/products/")) return;
+        if (url == null) return;
+        Path baseDir;
+        if (url.contains(PRODUCTS_PREFIX)) {
+            baseDir = uploadDirectory;
+        } else if (url.contains(CUSTOM_KEYCAPS_PREFIX)) {
+            baseDir = customKeycapDirectory;
+        } else {
+            return;
+        }
         String filename = url.substring(url.lastIndexOf('/') + 1);
         if (!filename.matches("[0-9a-fA-F-]{36}\\.(jpg|png|webp)")) return;
         try {
-            Files.deleteIfExists(uploadDirectory.resolve(filename).normalize());
+            Files.deleteIfExists(baseDir.resolve(filename).normalize());
         } catch (IOException e) {
             throw new IllegalStateException("기존 이미지를 삭제할 수 없습니다.", e);
         }
     }
 
-    public Path getUploadDirectory() { return uploadDirectory; }
+    public Path getUploadDirectory() {
+        return uploadDirectory;
+    }
+
+    public Path getCustomKeycapDirectory() {
+        return customKeycapDirectory;
+    }
 
     private String extension(String originalFilename) {
         String extension = StringUtils.getFilenameExtension(originalFilename);
@@ -80,7 +132,9 @@ public class ProductImageStorageService {
     }
 
     private boolean hasValidSignature(byte[] bytes, String extension) {
-        if (extension.equals("jpg")) return bytes.length >= 3 && (bytes[0] & 255) == 0xff && (bytes[1] & 255) == 0xd8 && (bytes[2] & 255) == 0xff;
+        if (extension.equals("jpg")) {
+            return bytes.length >= 3 && (bytes[0] & 255) == 0xff && (bytes[1] & 255) == 0xd8 && (bytes[2] & 255) == 0xff;
+        }
         if (extension.equals("png")) {
             byte[] signature = {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
             if (bytes.length < signature.length) return false;

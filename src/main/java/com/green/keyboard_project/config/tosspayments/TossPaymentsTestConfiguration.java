@@ -1,8 +1,10 @@
 package com.green.keyboard_project.config.tosspayments;
 
+import com.green.keyboard_project.service.payment.TossCancellationGateway;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
 
 /** 주문서형 결제의 테스트 설정 준비만 담당하며 API 호출이나 보안 정책을 추가하지 않습니다. */
@@ -21,5 +23,13 @@ public class TossPaymentsTestConfiguration {
             throw new IllegalStateException("토스페이먼츠 테스트 설정 오류: TOSS_PAYMENTS_SECRET_KEY의 환경변수 참조를 확인하세요.");
         }
         return TossPaymentsTestCredentials.fromSecretKey(secretKey);
+    }
+
+    // 테스트 결제 설정과 전액 취소 설정이 모두 켜진 로컬 프로필에서만 취소 클라이언트를 등록합니다.
+    @Bean
+    @Profile("local & !prod & !production")
+    @ConditionalOnProperty(prefix = "toss.payments.test", name = "full-cancel-enabled", havingValue = "true")
+    TossCancellationGateway tossCancellationGateway(TossPaymentsTestCredentials credentials) {
+        return new TossCancellationClient(credentials);
     }
 }
