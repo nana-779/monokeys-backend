@@ -2,6 +2,7 @@ package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.ApiResponse;
 import com.green.keyboard_project.dto.order.MyOrderSummary;
+import com.green.keyboard_project.dto.order.MyOrderDetail;
 import com.green.keyboard_project.dto.order.OrderCreateRequest;
 import com.green.keyboard_project.dto.order.OrderResponse;
 import com.green.keyboard_project.service.OrderService;
@@ -44,6 +45,12 @@ public class OrderController {
     }
 
     // 검증된 로그인 정보에서 회원 번호를 가져오며, 개인 주문 응답은 캐시에 저장하지 않습니다.
+    @PostMapping("/me/{orderNumber}/receipt")
+    public ApiResponse<Void> confirmMyDelivery(@PathVariable String orderNumber, @AuthenticationPrincipal Integer userId) {
+        orderService.confirmMyDelivery(userId, orderNumber);
+        return ApiResponse.ok();
+    }
+
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<List<MyOrderSummary>>> getMyOrders(
             @AuthenticationPrincipal Integer userId
@@ -54,7 +61,7 @@ public class OrderController {
 
     // 인증 주체의 회원 ID로 상세를 조회하고 개인 주문 응답은 캐시에 남기지 않습니다.
     @GetMapping("/me/{orderNumber}")
-    public ResponseEntity<ApiResponse<MyOrderSummary>> getMyOrder(
+    public ResponseEntity<ApiResponse<MyOrderDetail>> getMyOrder(
             @PathVariable String orderNumber, @AuthenticationPrincipal Integer userId
     ) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())

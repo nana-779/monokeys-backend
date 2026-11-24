@@ -1,5 +1,7 @@
 package com.green.keyboard_project.service.payment;
 
+import static com.green.keyboard_project.entity.OrderDelivery.DeliveryStatusType.PREPARING;
+
 import com.green.keyboard_project.dto.payment.OrderRefundPreview.Item;
 import com.green.keyboard_project.dto.payment.OrderRefundPreview.Status;
 import com.green.keyboard_project.entity.ManualBuild;
@@ -160,7 +162,7 @@ class OrderRefundEligibilityServiceTests {
         assertThat(service.preview(ORDER_NUMBER, MEMBER_ID).status()).isEqualTo(Status.POLICY_REVIEW_REQUIRED);
 
         payment.setPaymentMethod(PaymentMethodType.CARD);
-        when(deliveries.existsByOrder_OrderId(11)).thenReturn(true, false);
+        when(deliveries.existsByOrder_OrderIdAndDeliveryStatusNot(11, PREPARING)).thenReturn(true, false);
         assertThat(service.preview(ORDER_NUMBER, MEMBER_ID).status()).isEqualTo(Status.POLICY_REVIEW_REQUIRED);
 
         var item = new OrderItem();
@@ -174,7 +176,7 @@ class OrderRefundEligibilityServiceTests {
         assertThat(new PartTree("findByOrderNumberAndUser_UserIdAndUser_IsDeletedFalse", Order.class).getParts())
                 .hasSize(3);
         assertThat(new PartTree("findByOrder_OrderId", Payment.class).getParts()).hasSize(1);
-        assertThat(new PartTree("existsByOrder_OrderId", OrderDelivery.class).isExistsProjection()).isTrue();
+        assertThat(new PartTree("existsByOrder_OrderIdAndDeliveryStatusNot", OrderDelivery.class).isExistsProjection()).isTrue();
     }
 
     private void setUpPaidOrder() {

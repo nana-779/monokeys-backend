@@ -1,18 +1,16 @@
 package com.green.keyboard_project.service;
 
 import com.green.keyboard_project.dto.order.MyOrderSummary;
+import com.green.keyboard_project.dto.order.MyOrderDetail;
 import com.green.keyboard_project.dto.order.OrderCreateRequest;
 import com.green.keyboard_project.dto.order.OrderItemRequest;
 import com.green.keyboard_project.dto.order.OrderItemResponse;
 import com.green.keyboard_project.dto.order.OrderResponse;
-import com.green.keyboard_project.entity.Order;
-import com.green.keyboard_project.entity.OrderItem;
-import com.green.keyboard_project.entity.Payment;
-import com.green.keyboard_project.entity.Product;
-import com.green.keyboard_project.entity.User;
+import com.green.keyboard_project.entity.*;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
+import com.green.keyboard_project.repository.orders.OrderDeliveryRepository;
 import com.green.keyboard_project.repository.payment.PaymentRepository;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.orders.OrderItemRepository;
@@ -30,6 +28,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @Service
 @RequiredArgsConstructor
@@ -41,6 +41,7 @@ public class OrderService {
     private final CartItemRepository cartItemRepository;    // 장바구니(Cart) 조회용
     private final PaymentRepository paymentRepository;     // 결제(Payment) 데이터 접근 계층
     private final TossOrderConfirmClient tossOrderConfirmClient; // 토스페이먼츠 서버 최종 승인 클라이언트
+    private final OrderDeliveryRepository orderDeliveryRepository; // order_delivery에 접근
 
     /**
      * 주문 생성 (주문 및 주문 상품 일괄 저장)
@@ -155,6 +156,8 @@ public class OrderService {
         order.setPostalCode(request.getPostalCode().strip());
         order.setRoadAddress(request.getRoadAddress().strip());
         order.setDetailAddress(request.getDetailAddress().strip());
+        String deliveryMemo = request.getDeliveryMemo();
+        order.setDeliveryMemo(deliveryMemo == null || deliveryMemo.isBlank() ? null : deliveryMemo.strip());
         order.setOrderStatus(Order.OrderStatusType.PENDING);
         order.setTotalProductAmount(totalProductAmount);
         order.setDeliveryFee(deliveryFee);
@@ -190,6 +193,20 @@ public class OrderService {
         return responses;
     }
 
+    @Transactional
+    public void confirmMyDelivery(Integer userId, String orderNumber) {
+        if (userId == null) throw new UnauthenticatedException("로그인이 필요합니다.");
+        if (orderDeliveryRepository.confirmMyDelivery(orderNumber, userId) == 0) {
+            throw new InvalidStateException("본인의 배송 중인 주문만 수령 확인할 수 있습니다.");
+        }
+    }
+
+    @Scheduled(fixedDelay = 10, timeUnit = TimeUnit.MINUTES)
+    @Transactional
+    public void completeOverdueDeliveries() {
+        orderDeliveryRepository.completeOverdueDeliveries();
+    }
+
     // 회원 번호가 없는 요청은 조회를 시작하기 전에 막습니다.
     @Transactional(readOnly = true)
     public List<MyOrderSummary> getMyOrders(Integer userId) {
@@ -198,9 +215,13 @@ public class OrderService {
 
     /** 타인 주문과 존재하지 않는 주문에 같은 오류를 반환합니다. */
     @Transactional(readOnly = true)
-    public MyOrderSummary getMyOrder(Integer userId, String orderNumber) {
-        return readMyOrders(userId, orderNumber).stream().findFirst()
+    public MyOrderDetail getMyOrder(Integer userId, String orderNumber) {
+        var summary = readMyOrders(userId, orderNumber).stream().findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다."));
+        var order = orderRepository.findByOrderNumberAndUser_UserIdAndUser_IsDeletedFalse(orderNumber, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다."));
+        return new MyOrderDetail(summary, order.getOrdererName(), order.getOrdererPhone(),
+                order.getPostalCode(), order.getRoadAddress(), order.getDetailAddress());
     }
 
     private List<MyOrderSummary> readMyOrders(Integer userId, String orderNumber) {
@@ -290,6 +311,12 @@ public class OrderService {
         payment.setPaidAmount(amount);
         payment.setPaidAt(LocalDateTime.now());
         paymentRepository.save(payment);
+
+        // 결제가 완료된 주문의 배송 준비 행 생성
+        OrderDelivery delivery = new OrderDelivery();
+        delivery.setOrder(order);
+        delivery.setDeliveryStatus(OrderDelivery.DeliveryStatusType.PREPARING);
+        orderDeliveryRepository.save(delivery);
 
         // 4. 결제 성공 시 회원의 장바구니 비우기
         if (order.getUser() != null) {

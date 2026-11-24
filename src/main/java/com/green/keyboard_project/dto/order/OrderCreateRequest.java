@@ -47,6 +47,9 @@ public class OrderCreateRequest {
     @Size(max = 255, message = "상세 주소는 255자 이하여야 합니다.")
     private String detailAddress;
 
+    @Size(max = 255)
+    private String deliveryMemo;
+
     // 주문할 상품 및 수량 목록
     @NotEmpty(message = "주문 상품 목록은 비어 있을 수 없습니다.")
     @Valid

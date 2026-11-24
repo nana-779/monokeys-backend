@@ -5,9 +5,6 @@ import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,15 +38,8 @@ public class CustomKeycapImageCleanupService {
     @Value("${app.upload.custom-keycap-orphan-grace-minutes:60}")
     private long orphanGraceMinutes;
 
-    @Configuration
-    @EnableScheduling
-    @ConditionalOnProperty(
-            name = "app.upload.custom-keycap-cleanup-enabled",
-            havingValue = "true",
-            matchIfMissing = true
-    )
-    static class SchedulingConfig {
-    }
+    @Value("${app.upload.custom-keycap-cleanup-enabled:true}")
+    private boolean cleanupEnabled = true;
 
     /**
      * 장바구니(cart_item.custom_design_data)에 참조되지 않은 커스텀 키캡 이미지를 즉시 삭제합니다.
@@ -85,6 +75,7 @@ public class CustomKeycapImageCleanupService {
     )
     @Transactional(readOnly = true)
     public int cleanupOrphanFiles() {
+        if (!cleanupEnabled) return 0;
         return cleanupOrphanFilesOlderThan(Duration.ofMinutes(Math.max(0, orphanGraceMinutes)));
     }
 
