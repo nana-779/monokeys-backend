@@ -7,6 +7,7 @@ import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.repository.*;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
+import com.green.keyboard_project.repository.orders.OrderItemRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class CartService {
     private final AutoBuildRepository autoBuildRepository;
     private final ManualBuildItemRepository manualBuildItemRepository;
     private final AutoBuildItemRepository autoBuildItemRepository;
+    private final OrderItemRepository orderItemRepository;
 
     /**
      * 회원의 장바구니 목록 조회
@@ -332,31 +334,66 @@ public class CartService {
         item.setQuantity(quantity);
         item.setUpdatedAt(LocalDateTime.now());
     }
+
     /**
      * 장바구니 상품 단건 삭제 (DELETE /api/cart/{targetId})
      */
     @Transactional
     public void removeCartItem(int userId, int targetId) {
         User user = findUser(userId);
-        // 1. cartItemId로 삭제
+        // 1. cartItemId로 조회
         Optional<CartItem> byCartItemId = cartItemRepository.findByCartItemIdAndUser(targetId, user);
         if (byCartItemId.isPresent()) {
-            cartItemRepository.delete(byCartItemId.get());
+            deleteCartItemAndOrphanBuild(byCartItemId.get());
             return;
         }
         // 2. productId로 넘어왔을 경우 대비
         productRepository.findById(targetId)
                 .flatMap(product -> cartItemRepository.findByUserAndProduct(user, product))
-                .ifPresent(cartItemRepository::delete);
+                .ifPresent(this::deleteCartItemAndOrphanBuild);
     }
-
     /**
-     * 장바구니 전체 비우기 (DELETE)
+     * 장바구니 전체 비우기 (DELETE /api/cart)
      */
     @Transactional
     public void clearCart(int userId) {
         User user = findUser(userId);
-        cartItemRepository.deleteByUser(user);
+        List<CartItem> userItems = cartItemRepository.findByUser_UserId(userId);
+        for (CartItem item : userItems) {
+            deleteCartItemAndOrphanBuild(item);
+        }
+    }
+    /**
+     * 장바구니 항목 삭제 시, 커스텀 빌드와 부품 목록 테이블까지 연쇄 정리 삭제
+     */
+    private void deleteCartItemAndOrphanBuild(CartItem item) {
+        ManualBuild mb = item.getManualBuild();
+        AutoBuild ab = item.getAutoBuild();
+        // 1. 장바구니 행 먼저 삭제
+        cartItemRepository.delete(item);
+        cartItemRepository.flush(); // 외래키 연결을 완전히 끊기 위해 즉시 DB 반영
+        // 2. 수동 커스텀 빌드인 경우: 주문 내역 및 다른 장바구니에 쓰이지 않는다면 빌드와 부품 목록 완전 삭제
+        if (mb != null) {
+            int mbId = mb.getManualBuildId();
+            boolean usedInOtherCart = cartItemRepository.existsByManualBuild_ManualBuildId(mbId);
+            boolean usedInOrder = orderItemRepository.existsByManualBuild_ManualBuildId(mbId);
+            if (!usedInOtherCart && !usedInOrder) {
+                manualBuildItemRepository.deleteByManualBuild_ManualBuildId(mbId); // 자식(부품 4개) 먼저 삭제
+                manualBuildItemRepository.flush();
+                manualBuildRepository.delete(mb);                                 // 부모(빌드 본체) 삭제
+            }
+        }
+        // 3. 자동 추천 커스텀 빌드인 경우: 빌드와 부품 목록 완전 삭제
+        if (ab != null) {
+            int abId = ab.getAutoBuildId();
+            boolean usedInOtherCart = cartItemRepository.existsByAutoBuild_AutoBuildId(abId);
+            boolean usedInOrder = orderItemRepository.existsByAutoBuild_AutoBuildId(abId);
+            if (!usedInOtherCart && !usedInOrder) {
+                autoBuildItemRepository.deleteByAutoBuild_AutoBuildId(abId);       // 자식(부품 4개) 먼저 삭제
+                autoBuildItemRepository.flush();
+                autoBuildRepository.delete(ab);                                    // 부모(빌드 본체) 삭제
+            }
+        }
     }
 
     private User findUser(int userId) {
