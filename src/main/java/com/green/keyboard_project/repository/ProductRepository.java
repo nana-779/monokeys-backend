@@ -9,10 +9,17 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
 import java.util.List;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Integer>, JpaSpecificationExecutor<Product> {
+
+    @Query("SELECT p FROM Product p " +
+            "LEFT JOIN FETCH p.category c " +
+            "LEFT JOIN FETCH c.parent " +
+            "WHERE p.productId = :productId AND p.isDeleted = false AND p.isActive = true AND p.stockQuantity > 0")
+    Optional<Product> findActiveDetailById(@Param("productId") int productId);
 
     @Query("SELECT p FROM Product p " +
            "LEFT JOIN p.category c " +
