@@ -55,6 +55,7 @@ public class OrderCancellationService {
             throw new PaymentConfirmationException(409, "PROVIDER_PAYMENT_CHANGED", "Toss 결제 잔액 또는 상태를 다시 확인해 주세요.");
         }
         Integer providerAmount = OrderCancellationPolicy.providerAmount(request, before);
+        // 결제 행 잠금 아래 진행 중인 요청을 먼저 저장해 동시 요청이 결제사로 중복 전송되지 않게 합니다.
         int refundId = store.reserve(target, memberId, request);
         // DB 요청 번호로 고정한 멱등키와 식별 문구를 사용해 재조회에서 같은 금액의 다른 취소와 구분합니다.
         String idempotencyKey = "monokeys-refund-" + UUID.nameUUIDFromBytes(

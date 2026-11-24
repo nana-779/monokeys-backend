@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 
@@ -188,10 +189,34 @@ public class OrderService {
     // 회원 번호가 없는 요청은 조회를 시작하기 전에 막습니다.
     @Transactional(readOnly = true)
     public List<MyOrderSummary> getMyOrders(Integer userId) {
+        return readMyOrders(userId, null);
+    }
+
+    /** 타인 주문과 존재하지 않는 주문에 같은 오류를 반환합니다. */
+    @Transactional(readOnly = true)
+    public MyOrderSummary getMyOrder(Integer userId, String orderNumber) {
+        return readMyOrders(userId, orderNumber).stream().findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다."));
+    }
+
+    private List<MyOrderSummary> readMyOrders(Integer userId, String orderNumber) {
         if (userId == null) {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
-        return orderRepository.findMyOrderSummaries(userId);
+        var headers = orderRepository.findMyOrderSummaries(userId, orderNumber);
+        if (headers.isEmpty()) return List.of();
+
+        // 앞에서 소유권을 확인한 주문의 품목을 한 번에 읽고 주문 ID별로 묶습니다.
+        var orderIds = headers.stream().map(MyOrderSummary.Header::orderId).toList();
+        var itemsByOrder = new HashMap<Integer, List<MyOrderSummary.Item>>();
+        for (var item : orderItemRepository.findMyOrderItems(orderIds)) {
+            var product = item.getProduct();
+            var summary = new MyOrderSummary.Item(item.getOrderItemId(), item.getProductNameSnapshot(),
+                    item.getOrderedPrice(), item.getQuantity(), product == null ? null : product.getThumbnailUrl());
+            itemsByOrder.computeIfAbsent(item.getOrder().getOrderId(), id -> new ArrayList<>()).add(summary);
+        }
+        return headers.stream().map(header -> header.withItems(itemsByOrder.getOrDefault(header.orderId(), List.of())))
+                .toList();
     }
 
     /**

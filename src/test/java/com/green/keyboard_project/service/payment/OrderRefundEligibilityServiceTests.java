@@ -1,5 +1,6 @@
 package com.green.keyboard_project.service.payment;
 
+import com.green.keyboard_project.dto.payment.OrderRefundPreview.Item;
 import com.green.keyboard_project.dto.payment.OrderRefundPreview.Status;
 import com.green.keyboard_project.entity.ManualBuild;
 import com.green.keyboard_project.entity.Order;
@@ -88,6 +89,8 @@ class OrderRefundEligibilityServiceTests {
         assertThat(preview.status()).isEqualTo(Status.BLOCKED);
         assertThat(preview.paymentAmount()).isNull();
         assertThat(preview.localRemainingAmount()).isNull();
+        assertThat(preview.paymentMethod()).isNull();
+        assertThat(preview.items()).isEmpty();
         verifyNoInteractions(refunds, deliveries, items);
     }
 
@@ -95,7 +98,12 @@ class OrderRefundEligibilityServiceTests {
     void ordinaryPaidOrderPassesOnlyTheLocalPrecheck() {
         setUpPaidOrder();
         var item = new OrderItem();
-        item.setProduct(new Product());
+        var product = new Product();
+        product.setThumbnailUrl("https://example.com/thumbnail.png");
+        item.setProduct(product);
+        item.setProductNameSnapshot("Keyboard");
+        item.setOrderedPrice(5_000);
+        item.setQuantity(2);
         when(items.findByOrder(order)).thenReturn(List.of(item));
         when(refunds.findByPayment_PaymentIdOrderByRequestedAtDesc(21))
                 .thenReturn(List.of(refund(RefundStatusType.REJECTED, 9_000)));
@@ -104,6 +112,9 @@ class OrderRefundEligibilityServiceTests {
         assertThat(preview.status()).isEqualTo(Status.PRECHECK_PASSED);
         assertThat(preview.localRemainingAmount()).isEqualTo(10_000);
         assertThat(preview.cancellationEnabled()).isFalse();
+        assertThat(preview.pgProvider()).isEqualTo("TOSS");
+        assertThat(preview.paymentMethod()).isEqualTo(PaymentMethodType.CARD);
+        assertThat(preview.items()).containsExactly(new Item("Keyboard", 5_000, 2, product.getThumbnailUrl()));
         assertThat(preview.toString()).doesNotContain(payment.getPgTid());
     }
 

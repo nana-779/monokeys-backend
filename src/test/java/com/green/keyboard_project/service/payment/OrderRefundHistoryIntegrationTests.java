@@ -1,6 +1,8 @@
 package com.green.keyboard_project.service.payment;
 
 import com.green.keyboard_project.entity.Order;
+import com.green.keyboard_project.entity.OrderDelivery;
+import com.green.keyboard_project.entity.OrderItem;
 import com.green.keyboard_project.entity.Payment;
 import com.green.keyboard_project.entity.Refund;
 import com.green.keyboard_project.entity.User;
@@ -8,6 +10,8 @@ import com.green.keyboard_project.exceptions.PaymentConfirmationException;
 import com.green.keyboard_project.repository.RefundRepository;
 import com.green.keyboard_project.repository.UserRepository;
 import com.green.keyboard_project.repository.orders.OrderRepository;
+import com.green.keyboard_project.repository.orders.OrderDeliveryRepository;
+import com.green.keyboard_project.repository.orders.OrderItemRepository;
 import com.green.keyboard_project.repository.payment.PaymentRepository;
 import com.green.keyboard_project.security.AuthCookieFactory;
 import com.green.keyboard_project.security.JwtTokenProvider;
@@ -45,6 +49,8 @@ class OrderRefundHistoryIntegrationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired UserRepository users;
     @Autowired OrderRepository orders;
+    @Autowired OrderDeliveryRepository deliveries;
+    @Autowired OrderItemRepository items;
     @Autowired PaymentRepository payments;
     @Autowired RefundRepository refunds;
     @Autowired OrderCancellationStore store;
@@ -128,6 +134,70 @@ class OrderRefundHistoryIntegrationTests {
                 .isInstanceOfSatisfying(PaymentConfirmationException.class,
                         error -> assertThat(error.code()).isEqualTo("REFUND_TRANSACTION_DUPLICATE"));
         assertThat(refunds.findById(second).orElseThrow().getStatus()).isEqualTo(Refund.RefundStatusType.REQUESTED);
+    }
+
+    @Test
+    void myOrderListAndDetailReturnOwnedItemsAndStoredDeliveryStatus() throws Exception {
+        Fixture fixture = payment();
+        var order = fixture.payment().getOrder();
+        for (int quantity : new int[] {1, 2}) {
+            var item = new OrderItem();
+            item.setOrder(order);
+            item.setProductNameSnapshot("Switch " + quantity);
+            item.setOrderedPrice(250);
+            item.setQuantity(quantity);
+            items.saveAndFlush(item);
+        }
+
+        var delivery = new OrderDelivery();
+        delivery.setOrder(order);
+        delivery.setDeliveryStatus(OrderDelivery.DeliveryStatusType.DELIVERED);
+        delivery.setRecipientName("테스트 회원");
+        delivery.setRecipientPhone("01000000000");
+        delivery.setPostalCode("00000");
+        delivery.setRoadAddress("테스트 주소");
+        delivery.setDetailAddress("테스트 상세");
+        deliveries.saveAndFlush(delivery);
+
+        String detail = "/api/orders/me/{orderNumber}";
+        var owner = cookie(fixture.owner());
+        mockMvc.perform(get("/api/orders/me").cookie(owner))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].items.length()").value(2))
+                .andExpect(jsonPath("$.data[0].deliveryStatus").value("DELIVERED"));
+        mockMvc.perform(get(detail, fixture.orderNumber()).cookie(owner))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.data.items[0].productName").value("Switch 1"))
+                .andExpect(jsonPath("$.data.items[0].unitPrice").value(250))
+                .andExpect(jsonPath("$.data.items[1].quantity").value(2))
+                .andExpect(jsonPath("$.data.deliveryStatus").value("DELIVERED"))
+                .andExpect(jsonPath("$.data.ordererEmail").doesNotExist());
+        mockMvc.perform(get(detail, fixture.orderNumber())).andExpect(status().isUnauthorized());
+        var other = cookie(member());
+        String denied = mockMvc.perform(get(detail, fixture.orderNumber()).cookie(other))
+                .andExpect(status().isNotFound()).andReturn().getResponse().getContentAsString();
+        mockMvc.perform(get(detail, "ORD-MISSING").cookie(other))
+                .andExpect(status().isNotFound()).andExpect(content().string(denied));
+    }
+
+    @Test
+    void myOrdersKeepItemsWhenPaymentAndDeliveryAreMissing() throws Exception {
+        Fixture fixture = payment();
+        var item = new OrderItem();
+        item.setOrder(fixture.payment().getOrder());
+        item.setProductNameSnapshot("Unpaid item");
+        item.setOrderedPrice(500);
+        item.setQuantity(1);
+        items.saveAndFlush(item);
+        payments.deleteById(fixture.payment().getPaymentId());
+
+        mockMvc.perform(get("/api/orders/me").cookie(cookie(fixture.owner())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].items[0].productName").value("Unpaid item"))
+                .andExpect(jsonPath("$.data[0].deliveryStatus").doesNotExist())
+                .andExpect(jsonPath("$.data[0].paymentStatus").doesNotExist());
     }
 
     private Fixture payment() {
