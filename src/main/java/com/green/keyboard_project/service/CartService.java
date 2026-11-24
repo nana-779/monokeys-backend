@@ -39,17 +39,14 @@ public class CartService {
     @Transactional(readOnly = true)
     public List<CartItemResponse> getCartItems(int userId) {
         List<CartItem> items = cartItemRepository.findByUser_UserId(userId);
-
         return items.stream().map(item -> {
             CartItemResponse.CartItemResponseBuilder builder = CartItemResponse.builder()
                     .cartItemId(item.getCartItemId())
                     .userId(userId)
                     .quantity(item.getQuantity());
-
             Product product = item.getProduct();
             ManualBuild manualBuild = item.getManualBuild();
             AutoBuild autoBuild = item.getAutoBuild();
-
             // [A] 일반 단품 상품
             if (product != null) {
                 int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), item.getCartItemId());
@@ -61,7 +58,6 @@ public class CartService {
                         .thumbnailUrl(product.getThumbnailUrl())
                         .build();
             }
-
             // [B] 수동 커스텀 키보드 빌드
             if (manualBuild != null) {
                 List<Product> parts = getManualBuildProducts(manualBuild.getManualBuildId());
@@ -73,7 +69,6 @@ public class CartService {
                         .includeAssembly(manualBuild.isIncludeAssembly())
                         .build();
             }
-
             // [C] 자동 추천 키보드 빌드
             if (autoBuild != null) {
                 List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
@@ -85,7 +80,6 @@ public class CartService {
                         .includeAssembly(autoBuild.isIncludeAssembly())
                         .build();
             }
-
             return builder.build();
         }).toList();
     }
@@ -97,66 +91,60 @@ public class CartService {
     public void addCartItem(int userId, CartAddRequest request) {
         User user = findUser(userId);
         int quantity = (request.getQuantity() != null && request.getQuantity() > 0) ? request.getQuantity() : 1;
-
         // [A] 수동 커스텀 빌드 저장
         if (request.getManualBuildId() != null) {
             ManualBuild manualBuild = manualBuildRepository.findById(request.getManualBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("커스텀 빌드를 찾을 수 없습니다."));
             List<Product> parts = getManualBuildProducts(manualBuild.getManualBuildId());
             Optional<CartItem> existing = cartItemRepository.findByUserAndManualBuild(user, manualBuild);
-
             addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setManualBuild(manualBuild));
             return;
         }
-
         // [B] 자동 추천 빌드 저장
         if (request.getAutoBuildId() != null) {
             AutoBuild autoBuild = autoBuildRepository.findById(request.getAutoBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("추천 빌드를 찾을 수 없습니다."));
             List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
             Optional<CartItem> existing = cartItemRepository.findByUserAndAutoBuild(user, autoBuild);
-
             addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setAutoBuild(autoBuild));
             return;
         }
-
         // [C] 일반 단품 상품 저장
         if (request.getProductId() != null) {
             Product product = findProduct(request.getProductId());
             validateOnSale(product);
-
             Optional<CartItem> existingItem = cartItemRepository.findByUserAndProduct(user, product);
             Integer excludeId = existingItem.map(CartItem::getCartItemId).orElse(null);
-
             int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), excludeId);
             int availableStock = Math.max(0, product.getStockQuantity() - usedByOthers);
+            // 최대 재고수가 0개이면 바로 담기 거부
+            if (availableStock <= 0) {
+                throw new InvalidStateException("해당 상품은 현재 품절(또는 커스텀 키보드 부품으로 소진)되어 장바구니에 담을 수 없습니다.");
+            }
             int currentQty = existingItem.map(CartItem::getQuantity).orElse(0);
-            int totalRequested = currentQty + quantity;
-
-            if (totalRequested > availableStock) {
-                int remainCanAdd = Math.max(0, availableStock - currentQty);
+            // 이미 최대치만큼 담겨 있으면 추가 거부
+            if (currentQty >= availableStock) {
                 throw new InvalidStateException(
-                        "커스텀 키보드에 포함된 수량(" + usedByOthers + "개)으로 인해 단품은 최대 "
-                                + availableStock + "개까지만 담을 수 있습니다. (추가 가능: " + remainCanAdd + "개)"
+                        "커스텀 키보드에 포함된 수량(" + usedByOthers + "개)으로 인해 이미 최대 수량(" + availableStock + "개)만큼 담겨 있습니다."
                 );
             }
-
+            // 재고 초과 시 자동으로 남은 최대 재고수로 보정
+            int finalQuantity = Math.min(currentQty + quantity, availableStock);
             if (existingItem.isPresent()) {
                 CartItem item = existingItem.get();
-                item.setQuantity(totalRequested);
+                item.setQuantity(finalQuantity);
                 item.setUpdatedAt(LocalDateTime.now());
             } else {
                 CartItem newItem = new CartItem();
                 newItem.setUser(user);
                 newItem.setProduct(product);
-                newItem.setQuantity(quantity);
+                newItem.setQuantity(finalQuantity);
                 newItem.setCreatedAt(LocalDateTime.now());
                 newItem.setUpdatedAt(LocalDateTime.now());
                 cartItemRepository.save(newItem);
             }
             return;
         }
-
         throw new ResourceNotFoundException("추가할 상품 정보가 올바르지 않습니다.");
     }
 
@@ -169,37 +157,33 @@ public class CartService {
         if (quantity <= 0) {
             throw new InvalidStateException("1개 이상의 수량만 지정할 수 있습니다.");
         }
-
-        // 1. cartItemId로 우선 조회, 없으면 productId로 조회
+        // cartItemId로 직접 조회 (없으면 예외)
         CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
-                .orElseGet(() -> productRepository.findById(targetId)
-                        .flatMap(product -> cartItemRepository.findByUserAndProduct(user, product))
-                        .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다.")));
-
-        // 2. 단품 상품 수량 변경 검증
+                .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다."));
+        // 단품 상품 수량 변경 검증
         if (item.getProduct() != null) {
             Product product = item.getProduct();
             validateOnSale(product);
             int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), item.getCartItemId());
             int availableStock = Math.max(0, product.getStockQuantity() - usedByOthers);
+            if (availableStock <= 0) {
+                throw new InvalidStateException("해당 상품의 재고가 모두 소진되었습니다.");
+            }
             if (quantity > availableStock) {
-                throw new InvalidStateException(
-                        "커스텀 키보드에 포함된 수량(" + usedByOthers + "개)으로 인해 단품은 최대 "
-                                + availableStock + "개까지만 변경할 수 있습니다."
-                );
+                quantity = availableStock;
             }
         }
-        // 3. 커스텀 키보드(수동/자동) 수량 변경 검증
+        // 커스텀 키보드(수동/자동) 수량 변경 검증
         else if (item.getManualBuild() != null || item.getAutoBuild() != null) {
             List<Product> parts = getBuildProducts(item);
             int availableStock = calculateAvailableStockForParts(userId, parts, item.getCartItemId());
+            if (availableStock <= 0) {
+                throw new InvalidStateException("부품 재고가 모두 소진되었습니다.");
+            }
             if (quantity > availableStock) {
-                throw new InvalidStateException(
-                        "부품 재고(일반 단품에 담긴 수량 포함)가 부족하여 최대 " + availableStock + "개까지만 변경할 수 있습니다."
-                );
+                quantity = availableStock;
             }
         }
-
         // 검증 통과 시 수량 업데이트
         item.setQuantity(quantity);
         item.setUpdatedAt(LocalDateTime.now());
@@ -211,18 +195,10 @@ public class CartService {
     @Transactional
     public void removeCartItem(int userId, int targetId) {
         User user = findUser(userId);
-
-        // 1. cartItemId로 조회
-        Optional<CartItem> byCartItemId = cartItemRepository.findByCartItemIdAndUser(targetId, user);
-        if (byCartItemId.isPresent()) {
-            deleteCartItemAndOrphanBuild(byCartItemId.get());
-            return;
-        }
-
-        // 2. productId로 넘어왔을 경우 대비
-        productRepository.findById(targetId)
-                .flatMap(product -> cartItemRepository.findByUserAndProduct(user, product))
-                .ifPresent(this::deleteCartItemAndOrphanBuild);
+        // cartItemId로 조회 후 삭제 (없으면 예외)
+        CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
+                .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다."));
+        deleteCartItemAndOrphanBuild(item);
     }
 
     /**
@@ -243,12 +219,10 @@ public class CartService {
     private void deleteCartItemAndOrphanBuild(CartItem item) {
         ManualBuild mb = item.getManualBuild();
         AutoBuild ab = item.getAutoBuild();
-
-        // 1. 장바구니 행 먼저 삭제 후 즉시 DB 반영
+        // 장바구니 행 먼저 삭제 후 즉시 DB 반영
         cartItemRepository.delete(item);
         cartItemRepository.flush();
-
-        // 2. 수동 커스텀 빌드: 주문 및 다른 장바구니에서 쓰이지 않는 경우 고아 빌드 데이터 완전 삭제
+        // 수동 커스텀 빌드: 주문 및 다른 장바구니에서 쓰이지 않는 경우 고아 빌드 데이터 완전 삭제
         if (mb != null) {
             int mbId = mb.getManualBuildId();
             boolean usedInOtherCart = cartItemRepository.existsByManualBuild_ManualBuildId(mbId);
@@ -259,8 +233,7 @@ public class CartService {
                 manualBuildRepository.delete(mb);
             }
         }
-
-        // 3. 자동 추천 커스텀 빌드: 주문 및 다른 장바구니에서 쓰이지 않는 경우 고아 빌드 데이터 완전 삭제
+        // 자동 추천 커스텀 빌드: 주문 및 다른 장바구니에서 쓰이지 않는 경우 고아 빌드 데이터 완전 삭제
         if (ab != null) {
             int abId = ab.getAutoBuildId();
             boolean usedInOtherCart = cartItemRepository.existsByAutoBuild_AutoBuildId(abId);
@@ -280,23 +253,28 @@ public class CartService {
                                       int quantity, Consumer<CartItem> buildSetter) {
         Integer excludeId = existing.map(CartItem::getCartItemId).orElse(null);
         int availableStock = calculateAvailableStockForParts(user.getUserId(), parts, excludeId);
-
+        // 최대 재고수가 0개이면 바로 담기 거부
+        if (availableStock <= 0) {
+            throw new InvalidStateException("부품 재고가 부족하여 커스텀 키보드를 담을 수 없습니다.");
+        }
         if (existing.isPresent()) {
             CartItem item = existing.get();
-            int finalQuantity = item.getQuantity() + quantity;
-            if (finalQuantity > availableStock) {
-                throw new InvalidStateException("부품 재고가 부족하여 수량을 더 추가할 수 없습니다. (최대 가능: " + availableStock + "개)");
+            int currentQty = item.getQuantity();
+            // 이미 최대치만큼 담겨 있으면 추가 거부
+            if (currentQty >= availableStock) {
+                throw new InvalidStateException("부품 재고 부족으로 이미 최대 수량(" + availableStock + "개)만큼 담겨 있습니다.");
             }
+            // 재고 초과 시 자동으로 남은 최대 재고수로 보정
+            int finalQuantity = Math.min(currentQty + quantity, availableStock);
             item.setQuantity(finalQuantity);
             item.setUpdatedAt(LocalDateTime.now());
         } else {
-            if (quantity > availableStock) {
-                throw new InvalidStateException("부품 재고가 부족하여 해당 수량을 담을 수 없습니다. (최대 가능: " + availableStock + "개)");
-            }
+            // 신규 담기 시에도 최대치로 자동 보정
+            int finalQuantity = Math.min(quantity, availableStock);
             CartItem newItem = new CartItem();
             newItem.setUser(user);
             buildSetter.accept(newItem);
-            newItem.setQuantity(quantity);
+            newItem.setQuantity(finalQuantity);
             newItem.setCreatedAt(LocalDateTime.now());
             newItem.setUpdatedAt(LocalDateTime.now());
             cartItemRepository.save(newItem);
@@ -311,7 +289,6 @@ public class CartService {
         int maxStock = calculateAvailableStockForParts(userId, parts, cartItemId);
         String thumb = extractThumbnail(parts);
         List<Integer> partIds = parts.stream().map(Product::getProductId).toList();
-
         return builder.stockQuantity(maxStock)
                 .thumbnailUrl(thumb)
                 .partProductIds(partIds);
@@ -377,13 +354,11 @@ public class CartService {
     private int getUsedQuantityInCart(int userId, int productId, Integer excludeCartItemId) {
         List<CartItem> userItems = cartItemRepository.findByUser_UserId(userId);
         int totalUsed = 0;
-
         for (CartItem item : userItems) {
             // 자기 자신 항목은 제외 (현재 항목의 수량을 변경하거나 조회할 때 중복 차감 방지)
             if (excludeCartItemId != null && item.getCartItemId() == excludeCartItemId) {
                 continue;
             }
-
             // 1. 일반 단품으로 담겨 있는 수량 합산
             if (item.getProduct() != null && item.getProduct().getProductId() == productId) {
                 totalUsed += item.getQuantity();
@@ -415,7 +390,6 @@ public class CartService {
                     return new ResourceNotFoundException("상품을 찾을 수 없습니다.");
                 });
     }
-
     private void validateOnSale(Product product) {
         if (!product.isActive() || product.isDeleted()) {
             log.warn("판매하지 않는 상품 장바구니 요청. productId={}", product.getProductId());
