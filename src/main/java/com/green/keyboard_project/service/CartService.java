@@ -43,15 +43,24 @@ public class CartService {
                     .stockQuantity(product != null ? product.getStockQuantity() : 0)
                     .quantity(item.getQuantity())
                     .thumbnailUrl(product != null ? product.getThumbnailUrl() : "")
+                    .customDesignData(item.getCustomDesignData())
                     .build();
         }).toList();
     }
 
     /**
-     * 장바구니 상품 추가
+     * 장바구니 상품 추가 (일반 상품)
      */
     @Transactional
     public void addCartItem(int userId, int productId, int quantity) {
+        addCartItem(userId, productId, quantity, null);
+    }
+
+    /**
+     * 장바구니 상품 추가 (일반 상품 + 커스텀 키캡 디자인 분리 지원)
+     */
+    @Transactional
+    public void addCartItem(int userId, int productId, int quantity, String customDesignData) {
         User user = findUser(userId);
         Product product = findProduct(productId);
         validateOnSale(product);
@@ -60,7 +69,30 @@ public class CartService {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
 
-        Optional<CartItem> existingItem = cartItemRepository.findByUserAndProduct(user, product);
+        String normalizedDesign =
+                customDesignData != null && !customDesignData.isBlank() ? customDesignData.trim() : null;
+
+        if (normalizedDesign != null) {
+            int currentProductTotalQty = cartItemRepository.findAllByUserAndProduct(user, product)
+                    .stream()
+                    .mapToInt(CartItem::getQuantity)
+                    .sum();
+            if (currentProductTotalQty + quantity > product.getStockQuantity()) {
+                throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+            }
+            CartItem customItem = new CartItem();
+            customItem.setUser(user);
+            customItem.setProduct(product);
+            customItem.setCustomDesignData(normalizedDesign);
+            customItem.setQuantity(quantity);
+            customItem.setCreatedAt(LocalDateTime.now());
+            customItem.setUpdatedAt(LocalDateTime.now());
+            cartItemRepository.save(customItem);
+            return;
+        }
+
+        Optional<CartItem> existingItem =
+                cartItemRepository.findFirstByUserAndProductAndCustomDesignDataIsNull(user, product);
 
         if (existingItem.isPresent()) {
             CartItem item = existingItem.get();
@@ -82,7 +114,7 @@ public class CartService {
     }
 
     /**
-     * 장바구니 상품 수량 변경 (PATCH)
+     * 장바구니 상품 수량 변경 (PATCH /api/cart/{productId})
      */
     @Transactional
     public void updateCartItemQuantity(int userId, int productId, int quantity) {
@@ -94,7 +126,8 @@ public class CartService {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
 
-        CartItem item = cartItemRepository.findByUserAndProduct(user, product)
+        CartItem item = cartItemRepository.findFirstByUserAndProductAndCustomDesignDataIsNull(user, product)
+                .or(() -> cartItemRepository.findFirstByUserAndProduct(user, product))
                 .orElseThrow(() -> {
                     log.warn("장바구니에 존재하지 않는 상품 수량 변경 시도. userId={}, productId={}", userId, productId);
                     return new ResourceNotFoundException("장바구니에 해당 상품이 없습니다.");
@@ -105,13 +138,56 @@ public class CartService {
     }
 
     /**
-     * 장바구니 상품 단건 삭제 (DELETE)
+     * 장바구니 개별 행 수량 변경 (PATCH /api/cart/items/{cartItemId})
+     */
+    @Transactional
+    public void updateCartItemQuantityById(int userId, int cartItemId, int quantity) {
+        CartItem item = cartItemRepository.findByCartItemIdAndUser_UserId(cartItemId, userId)
+                .orElseThrow(() -> {
+                    log.warn("장바구니 개별 행 수량 변경 시도. userId={}, cartItemId={}", userId, cartItemId);
+                    return new ResourceNotFoundException("장바구니에 해당 상품이 없습니다.");
+                });
+
+        Product product = item.getProduct();
+        if (product != null) {
+            validateOnSale(product);
+            if (quantity <= 0 || quantity > product.getStockQuantity()) {
+                throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+            }
+            int otherQty = cartItemRepository.findAllByUserAndProduct(item.getUser(), product)
+                    .stream()
+                    .filter(other -> other.getCartItemId() != cartItemId)
+                    .mapToInt(CartItem::getQuantity)
+                    .sum();
+            if (otherQty + quantity > product.getStockQuantity()) {
+                throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+            }
+        } else if (quantity <= 0) {
+            throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+        }
+
+        item.setQuantity(quantity);
+        item.setUpdatedAt(LocalDateTime.now());
+    }
+
+    /**
+     * 장바구니 상품 단건 삭제 (DELETE /api/cart/{productId})
      */
     @Transactional
     public void removeCartItem(int userId, int productId) {
         User user = findUser(userId);
         Product product = findProduct(productId);
-        cartItemRepository.findByUserAndProduct(user, product)
+        cartItemRepository.findFirstByUserAndProductAndCustomDesignDataIsNull(user, product)
+                .or(() -> cartItemRepository.findFirstByUserAndProduct(user, product))
+                .ifPresent(cartItemRepository::delete);
+    }
+
+    /**
+     * 장바구니 개별 행 단건 삭제 (DELETE /api/cart/items/{cartItemId})
+     */
+    @Transactional
+    public void removeCartItemById(int userId, int cartItemId) {
+        cartItemRepository.findByCartItemIdAndUser_UserId(cartItemId, userId)
                 .ifPresent(cartItemRepository::delete);
     }
 

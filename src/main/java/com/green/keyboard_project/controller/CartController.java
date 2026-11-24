@@ -51,7 +51,7 @@ public class CartController {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
 
-        cartService.addCartItem(userId, request.getProductId(), request.getQuantity());
+        cartService.addCartItem(userId, request.getProductId(), request.getQuantity(), request.getCustomDesignData());
         return ResponseEntity.ok(ApiResponse.ok("장바구니에 추가되었습니다."));
     }
 
@@ -75,6 +75,25 @@ public class CartController {
     }
 
     /**
+     * 3-1. 장바구니 개별 행(커스텀 디자인 구분) 수량 변경 (PATCH /api/cart/items/{cartItemId})
+     */
+    @PatchMapping("/items/{cartItemId}")
+    public ResponseEntity<ApiResponse<String>> updateCartItemQuantityById(
+            @AuthenticationPrincipal Integer userId,
+            @PathVariable int cartItemId,
+            @RequestBody CartQuantityUpdateRequest request
+    ) {
+        if (userId == null) {
+            throw new UnauthenticatedException("로그인이 필요합니다.");
+        }
+        if (request.getQuantity() == null) {
+            throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
+        }
+        cartService.updateCartItemQuantityById(userId, cartItemId, request.getQuantity());
+        return ResponseEntity.ok(ApiResponse.ok("수량이 변경되었습니다."));
+    }
+
+    /**
      * 4. 장바구니 상품 단건 삭제 (DELETE /api/cart/{productId})
      */
     @DeleteMapping("/{productId}")
@@ -86,6 +105,21 @@ public class CartController {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
         cartService.removeCartItem(userId, productId);
+        return ResponseEntity.ok(ApiResponse.ok("장바구니에서 삭제되었습니다."));
+    }
+
+    /**
+     * 4-1. 장바구니 개별 행(커스텀 디자인 구분) 단건 삭제 (DELETE /api/cart/items/{cartItemId})
+     */
+    @DeleteMapping("/items/{cartItemId}")
+    public ResponseEntity<ApiResponse<String>> removeCartItemById(
+            @AuthenticationPrincipal Integer userId,
+            @PathVariable int cartItemId
+    ) {
+        if (userId == null) {
+            throw new UnauthenticatedException("로그인이 필요합니다.");
+        }
+        cartService.removeCartItemById(userId, cartItemId);
         return ResponseEntity.ok(ApiResponse.ok("장바구니에서 삭제되었습니다."));
     }
 

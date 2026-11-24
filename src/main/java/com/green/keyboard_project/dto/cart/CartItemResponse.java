@@ -23,4 +23,5 @@ public class CartItemResponse {
     private Integer stockQuantity;
     private Integer quantity;
     private String thumbnailUrl;
+    private String customDesignData;
 }
