@@ -151,6 +151,10 @@ public class OrderService {
         order.setOrdererName(ordererName);
         order.setOrdererPhone(cleanPhone);
         order.setOrdererEmail(ordererEmail);
+        // 회원 기본 주소가 나중에 바뀌어도 주문 당시 배송지를 확인할 수 있도록 주문에 보존합니다.
+        order.setPostalCode(request.getPostalCode().strip());
+        order.setRoadAddress(request.getRoadAddress().strip());
+        order.setDetailAddress(request.getDetailAddress().strip());
         order.setOrderStatus(Order.OrderStatusType.PENDING);
         order.setTotalProductAmount(totalProductAmount);
         order.setDeliveryFee(deliveryFee);

@@ -1,14 +1,21 @@
 package com.green.keyboard_project.service.payment;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.green.keyboard_project.entity.CartItem;
+import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.Order;
 import com.green.keyboard_project.entity.OrderDelivery;
 import com.green.keyboard_project.entity.OrderItem;
 import com.green.keyboard_project.entity.Payment;
+import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.Refund;
 import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.exceptions.PaymentConfirmationException;
+import com.green.keyboard_project.repository.CategoryRepository;
+import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.RefundRepository;
 import com.green.keyboard_project.repository.UserRepository;
+import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.orders.OrderRepository;
 import com.green.keyboard_project.repository.orders.OrderDeliveryRepository;
 import com.green.keyboard_project.repository.orders.OrderItemRepository;
@@ -21,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -28,9 +36,13 @@ import org.springframework.web.context.WebApplicationContext;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -48,6 +60,9 @@ class OrderRefundHistoryIntegrationTests {
     @Autowired JwtTokenProvider jwt;
     @Autowired JdbcTemplate jdbc;
     @Autowired UserRepository users;
+    @Autowired CategoryRepository categories;
+    @Autowired ProductRepository products;
+    @Autowired CartItemRepository cartItems;
     @Autowired OrderRepository orders;
     @Autowired OrderDeliveryRepository deliveries;
     @Autowired OrderItemRepository items;
@@ -56,6 +71,7 @@ class OrderRefundHistoryIntegrationTests {
     @Autowired OrderCancellationStore store;
 
     private MockMvc mockMvc;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
@@ -152,11 +168,6 @@ class OrderRefundHistoryIntegrationTests {
         var delivery = new OrderDelivery();
         delivery.setOrder(order);
         delivery.setDeliveryStatus(OrderDelivery.DeliveryStatusType.DELIVERED);
-        delivery.setRecipientName("테스트 회원");
-        delivery.setRecipientPhone("01000000000");
-        delivery.setPostalCode("00000");
-        delivery.setRoadAddress("테스트 주소");
-        delivery.setDetailAddress("테스트 상세");
         deliveries.saveAndFlush(delivery);
 
         String detail = "/api/orders/me/{orderNumber}";
@@ -200,6 +211,81 @@ class OrderRefundHistoryIntegrationTests {
                 .andExpect(jsonPath("$.data[0].paymentStatus").doesNotExist());
     }
 
+    @Test
+    void orderCreationStoresTrimmedCheckoutAddress() throws Exception {
+        // 체크아웃과 같은 JSON으로 요청해 앞뒤 공백을 뺀 주소 세 값이 주문 행에 저장되는지 확인합니다.
+        var owner = member();
+        var product = cartProduct(owner);
+        mockMvc.perform(post("/api/orders").cookie(cookie(owner))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(orderRequest(owner, product))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orderStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.finalPayAmount").value(500));
+
+        assertThat(jdbc.queryForMap(
+                "select postal_code, road_address, detail_address from orders where user_id = ?", owner.getUserId()))
+                .containsEntry("POSTAL_CODE", "04524")
+                .containsEntry("ROAD_ADDRESS", "서울 세종대로")
+                .containsEntry("DETAIL_ADDRESS", "101호");
+        assertThat(products.findById(product.getProductId()).orElseThrow().getStockQuantity()).isEqualTo(4);
+    }
+
+    @Test
+    void invalidCheckoutAddressesDoNotSaveOrdersOrChangeStock() throws Exception {
+        // 주소별 누락·공백·길이 초과 요청이 저장과 재고 차감 전에 거부되는지 확인합니다.
+        var owner = member();
+        var product = cartProduct(owner);
+        var lengths = Map.of("postalCode", 10, "roadAddress", 255, "detailAddress", 255);
+        for (var field : lengths.entrySet()) {
+            var missing = orderRequest(owner, product);
+            missing.remove(field.getKey());
+            var blank = orderRequest(owner, product);
+            blank.put(field.getKey(), "   ");
+            var tooLong = orderRequest(owner, product);
+            tooLong.put(field.getKey(), "가".repeat(field.getValue() + 1));
+            for (var request : List.of(missing, blank, tooLong)) {
+                mockMvc.perform(post("/api/orders").cookie(cookie(owner))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(objectMapper.writeValueAsString(request)))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.message", containsString(field.getKey())));
+            }
+        }
+        assertThat(jdbc.queryForObject("select count(*) from orders where user_id = ?", Integer.class, owner.getUserId()))
+                .isZero();
+        assertThat(products.findById(product.getProductId()).orElseThrow().getStockQuantity()).isEqualTo(5);
+    }
+
+    private Map<String, Object> orderRequest(User owner, Product product) {
+        return new HashMap<>(Map.of("ordererEmail", owner.getEmail(), "postalCode", " 04524 ",
+                "roadAddress", " 서울 세종대로 ", "detailAddress", " 101호 ",
+                "items", List.of(Map.of("productId", product.getProductId(), "quantity", 1))));
+    }
+
+    private Product cartProduct(User owner) {
+        var category = new Category();
+        category.setCategoryId("address-test-" + UUID.randomUUID());
+        category.setName("테스트 상품 분류");
+        var product = new Product();
+        product.setCategory(categories.saveAndFlush(category));
+        product.setName("배송지 테스트 상품");
+        product.setBasePrice(500);
+        product.setStockQuantity(5);
+        product.setActive(true);
+        product.setCreatedAt(NOW);
+        product.setUpdatedAt(NOW);
+        product = products.saveAndFlush(product);
+        var cartItem = new CartItem();
+        cartItem.setUser(owner);
+        cartItem.setProduct(product);
+        cartItem.setQuantity(1);
+        cartItem.setCreatedAt(NOW);
+        cartItem.setUpdatedAt(NOW);
+        cartItems.saveAndFlush(cartItem);
+        return product;
+    }
+
     private Fixture payment() {
         User owner = member();
         var order = new Order();
@@ -208,6 +294,10 @@ class OrderRefundHistoryIntegrationTests {
         order.setOrdererName(owner.getName());
         order.setOrdererPhone("01000000000");
         order.setOrdererEmail(owner.getEmail());
+        // 배송 정보 행과 별개로 주문 픽스처에 주문 당시 주소를 저장합니다.
+        order.setPostalCode("00000");
+        order.setRoadAddress("테스트 주소");
+        order.setDetailAddress("테스트 상세");
         order.setOrderStatus(Order.OrderStatusType.ORDERED);
         order.setTotalProductAmount(1000);
         order.setFinalPayAmount(1000);
