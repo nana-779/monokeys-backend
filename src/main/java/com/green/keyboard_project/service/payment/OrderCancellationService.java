@@ -1,0 +1,179 @@
+package com.green.keyboard_project.service.payment;
+
+import com.green.keyboard_project.dto.payment.OrderCancellationRequest;
+import com.green.keyboard_project.exceptions.PaymentConfirmationException;
+import com.green.keyboard_project.service.payment.OrderCancellationStore.Target;
+import com.green.keyboard_project.service.payment.TossCancellationGateway.Cancellation;
+import com.green.keyboard_project.service.payment.TossCancellationGateway.Failure;
+import com.green.keyboard_project.service.payment.TossCancellationGateway.Snapshot;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/** 본인 결제의 전액 취소 요청과 저장된 환불 결과의 재확인을 조율합니다. */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class OrderCancellationService {
+    private final OrderCancellationStore store;
+    private final ObjectProvider<TossCancellationGateway> gateways;
+
+    public record Result(int refundId, String status, int amount) {}
+
+    @Transactional(propagation = Propagation.NEVER)
+    public Result cancel(String orderNumber, Integer memberId, OrderCancellationRequest request) {
+        // HTTP 이외의 경로에서 호출해도 부분 취소 요청은 결제 조회 전에 거부합니다.
+        if (request.mode() != OrderCancellationRequest.Mode.FULL) {
+            throw OrderCancellationRequest.fullCancellationOnly();
+        }
+        Target target = store.inspect(orderNumber, memberId);
+        int amount = request.amountFor(target.remaining());
+        // 사전 확인 화면과 같은 기준으로 최초 결제 금액 전체를 취소할 수 있는 주문만 받습니다.
+        if (target.remaining() != target.total()) {
+            throw new PaymentConfirmationException(409, "REFUND_BALANCE_CHANGED",
+                    "이전 취소 내역이 있는 결제는 전액 취소할 수 없습니다.");
+        }
+        TossCancellationGateway gateway = configuredGateway();
+
+        Snapshot before;
+        try {
+            before = gateway.lookup(target.paymentKey());
+        } catch (Failure error) {
+            recordIssue(target, null, error.code(), "LOOKUP_FAILED");
+            throw providerError(error);
+        }
+        if (!matchesPayment(target, before) || before.virtualAccount() || before.balance() != target.remaining()) {
+            throw new PaymentConfirmationException(409, "PROVIDER_PAYMENT_CHANGED", "Toss 결제 잔액 또는 상태를 다시 확인해 주세요.");
+        }
+        Integer providerAmount = OrderCancellationPolicy.providerAmount(request, before);
+        int refundId = store.reserve(target, memberId, request);
+        // DB 요청 번호로 고정한 멱등키와 식별 문구를 사용해 재조회에서 같은 금액의 다른 취소와 구분합니다.
+        String idempotencyKey = "monokeys-refund-" + UUID.nameUUIDFromBytes(
+                (target.paymentKey() + ":" + refundId).getBytes(StandardCharsets.UTF_8));
+        String markedReason = markedReason(request.cancelReason(), refundId);
+        Set<String> previousKeys = before.cancellations().stream().map(Cancellation::transactionKey)
+                .collect(Collectors.toSet());
+        Cancellation confirmed;
+        try {
+            Snapshot result = gateway.cancel(target.paymentKey(), markedReason, providerAmount,
+                    request.refundReceiveAccount(), idempotencyKey);
+            confirmed = findConfirmed(target, amount, markedReason, previousKeys, result);
+        } catch (Failure failure) {
+            recordIssue(target, refundId, failure.code(), failure.uncertain() ? "PENDING_CONFIRMATION" : "REJECTED");
+            if (!failure.uncertain()) {
+                try {
+                    store.reject(target.paymentId(), refundId);
+                } catch (RuntimeException storageFailure) {
+                    recordIssue(target, refundId, "REFUND_WRITE_FAILED", "PENDING_CONFIRMATION");
+                    return new Result(refundId, "PENDING_CONFIRMATION", amount);
+                }
+                throw providerError(failure);
+            }
+            confirmed = null;
+        }
+
+        // 응답을 못 받았거나 거래를 식별할 수 없으면 조회만 한 번 수행합니다. 취소 POST는 반복하지 않습니다.
+        if (confirmed == null) {
+            try {
+                confirmed = findConfirmed(target, amount, markedReason, previousKeys, gateway.lookup(target.paymentKey()));
+            } catch (Failure failure) {
+                recordIssue(target, refundId, failure.code(), "PENDING_CONFIRMATION");
+                return new Result(refundId, "PENDING_CONFIRMATION", amount);
+            }
+        }
+        return persistOutcome(target, refundId, amount, confirmed);
+    }
+
+    // 네트워크 장애나 서버 재시작 뒤에도 저장된 요청을 재조회하며 취소 POST를 다시 전송하지 않습니다.
+    @Transactional(propagation = Propagation.NEVER)
+    public Result reconcile(String orderNumber, Integer memberId) {
+        var pending = store.pendingForRecovery(orderNumber, memberId);
+        TossCancellationGateway gateway = configuredGateway();
+        Cancellation confirmed;
+        try {
+            confirmed = findConfirmed(pending.target(), pending.amount(), markedReason(pending.reason(), pending.refundId()),
+                    Set.of(), gateway.lookup(pending.target().paymentKey()));
+        } catch (Failure failure) {
+            recordIssue(pending.target(), pending.refundId(), failure.code(), "PENDING_CONFIRMATION");
+            confirmed = null;
+        }
+        return persistOutcome(pending.target(), pending.refundId(), pending.amount(), confirmed);
+    }
+
+    private Result persistOutcome(Target target, int refundId, int amount, Cancellation confirmed) {
+        if (confirmed == null) {
+            recordIssue(target, refundId, "REFUND_NOT_CONFIRMED", "PENDING_CONFIRMATION");
+            return new Result(refundId, "PENDING_CONFIRMATION", amount);
+        }
+        try {
+            store.complete(target.paymentId(), refundId, confirmed);
+        } catch (RuntimeException storageFailure) {
+            // PG가 취소됐어도 로컬 기록을 확정하지 못했다면 요청 행을 남겨 후속 대사를 기다립니다.
+            recordIssue(target, refundId, "REFUND_WRITE_FAILED", "PENDING_CONFIRMATION");
+            return new Result(refundId, "PENDING_CONFIRMATION", amount);
+        }
+        log.info("refund order={} request={} status=CANCELLATION_CONFIRMED", safeOrderNumber(target), refundId);
+        return new Result(refundId, "CANCELLATION_CONFIRMED", amount);
+    }
+
+    private static PaymentConfirmationException providerError(Failure failure) {
+        return new PaymentConfirmationException(failure.status(), failure.code(), failure.getMessage());
+    }
+
+    // 로그 시각과 함께 내부 식별정보만 남기고 원본 예외, 결제 키, 사유, 계좌정보를 기록하지 않습니다.
+    private static void recordIssue(Target target, Integer refundId, String code, String state) {
+        log.warn("refund order={} request={} code={} status={}", safeOrderNumber(target), refundId, code, state);
+    }
+
+    private static String safeOrderNumber(Target target) {
+        return target.orderNumber().matches("[A-Za-z0-9_=-]{1,32}") ? target.orderNumber() : "[redacted]";
+    }
+
+    private TossCancellationGateway configuredGateway() {
+        // 테스트 환경 활성화 조건이 충족되지 않으면 결제사와 통신하지 않습니다.
+        TossCancellationGateway gateway = gateways.getIfAvailable();
+        if (gateway == null) {
+            throw new PaymentConfirmationException(503, "CANCELLATION_NOT_ENABLED", "결제 취소 기능은 준비 중입니다.");
+        }
+        return gateway;
+    }
+
+    private static String markedReason(String reason, int refundId) {
+        return reason + " [MK-R" + refundId + "]";
+    }
+
+    private static boolean matchesPayment(Target target, Snapshot payment) {
+        return payment != null && Objects.equals(target.paymentKey(), payment.paymentKey())
+                && Objects.equals(target.orderNumber(), payment.orderNumber())
+                && "KRW".equals(payment.currency()) && target.total() == payment.total();
+    }
+
+    // 상태·잔액과 이번 요청의 유일한 취소 거래를 모두 검증한 경우만 완료할 수 있습니다.
+    private static Cancellation findConfirmed(Target target, int amount, String markedReason,
+                                              Set<String> previousKeys, Snapshot after) {
+        int expectedBalance = target.remaining() - amount;
+        String expectedStatus = expectedBalance == 0 ? "CANCELED" : "PARTIAL_CANCELED";
+        if (!matchesPayment(target, after) || after.virtualAccount() || after.balance() != expectedBalance
+                || !expectedStatus.equals(after.status())) return null;
+        var matches = after.cancellations().stream()
+                .filter(row -> markedReason.equals(row.reason()) && amount == row.amount()
+                        && "DONE".equals(row.status()) && row.canceledAt() != null
+                        && row.transactionKey() != null && row.transactionKey().matches("[!-~]{1,64}")
+                        && !previousKeys.contains(row.transactionKey()))
+                .toList();
+        if (matches.size() != 1) return null;
+        Cancellation match = matches.getFirst();
+        long sameKeyCount = after.cancellations().stream()
+                .filter(row -> match.transactionKey().equals(row.transactionKey())).count();
+        return sameKeyCount == 1 ? match : null;
+    }
+}

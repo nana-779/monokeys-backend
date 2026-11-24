@@ -10,4 +10,6 @@ import java.util.List;
 public interface RefundRepository extends JpaRepository<Refund, Integer> {
 
     List<Refund> findByPayment_PaymentIdOrderByRequestedAtDesc(int paymentId);
+
+    boolean existsByPgCancelTid(String transactionKey);
 }

@@ -1,11 +1,13 @@
 package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.ApiResponse;
+import com.green.keyboard_project.dto.order.MyOrderSummary;
 import com.green.keyboard_project.dto.order.OrderCreateRequest;
 import com.green.keyboard_project.dto.order.OrderResponse;
 import com.green.keyboard_project.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -39,6 +41,15 @@ public class OrderController {
     public ResponseEntity<ApiResponse<List<OrderResponse>>> getOrders() {
         List<OrderResponse> responses = orderService.getAllOrders();
         return ResponseEntity.ok(ApiResponse.ok(responses));
+    }
+
+    // 검증된 로그인 정보에서 회원 번호를 가져오며, 개인 주문 응답은 캐시에 저장하지 않습니다.
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<List<MyOrderSummary>>> getMyOrders(
+            @AuthenticationPrincipal Integer userId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiResponse.ok(orderService.getMyOrders(userId)));
     }
 
     /**

@@ -4,6 +4,7 @@ import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,8 @@ import java.time.LocalDateTime;
 // local 프로필에서만 실행된다 (각자 application-secret.properties에 spring.profiles.active=local)
 // TODO: 회원가입 기능 완성 후 삭제 검토
 @Profile("local")
+// 기존 공유 DB에서 환불 확인을 할 때는 시작 시 회원 생성을 끌 수 있습니다.
+@ConditionalOnProperty(name = "monokeys.local.seed-users", havingValue = "true", matchIfMissing = true)
 @Component
 @RequiredArgsConstructor
 public class TestDataInitializer implements CommandLineRunner {
