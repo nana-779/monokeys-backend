@@ -52,6 +52,15 @@ public class OrderController {
                 .body(ApiResponse.ok(orderService.getMyOrders(userId)));
     }
 
+    // 인증 주체의 회원 ID로 상세를 조회하고 개인 주문 응답은 캐시에 남기지 않습니다.
+    @GetMapping("/me/{orderNumber}")
+    public ResponseEntity<ApiResponse<MyOrderSummary>> getMyOrder(
+            @PathVariable String orderNumber, @AuthenticationPrincipal Integer userId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiResponse.ok(orderService.getMyOrder(userId, orderNumber)));
+    }
+
     /**
      * 3. 주문 단건 조회 - 주문 ID 기준 (GET /api/orders/{orderId})
      * - PK인 orderId로 특정 주문의 상세 정보와 품목 목록을 조회합니다.

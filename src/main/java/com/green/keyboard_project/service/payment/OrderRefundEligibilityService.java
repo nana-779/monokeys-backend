@@ -49,8 +49,14 @@ public class OrderRefundEligibilityService {
         Payment payment = payments.findByOrder_OrderId(order.getOrderId()).orElse(null);
         if (payment == null) {
             return new OrderRefundPreview(order.getOrderNumber(), null, null, null, Status.BLOCKED,
-                    "등록된 결제 정보가 없습니다.", false);
+                    "등록된 결제 정보가 없습니다.", false, null, null, List.of());
         }
+        var orderItems = items.findByOrder(order);
+        // 상품명과 단가는 주문 당시 값을 사용하고, 썸네일은 연결된 현재 상품에서 읽습니다.
+        var previewItems = orderItems.stream()
+                .map(item -> new OrderRefundPreview.Item(item.getProductNameSnapshot(), item.getOrderedPrice(),
+                        item.getQuantity(), item.getProduct() == null ? null : item.getProduct().getThumbnailUrl()))
+                .toList();
 
         List<Refund> history = refunds.findByPayment_PaymentIdOrderByRequestedAtDesc(payment.getPaymentId());
         // 완료된 금액만 차감합니다. 진행 중인 요청은 금액 확정 대신 중복 요청 제한에 사용합니다.
@@ -94,7 +100,6 @@ public class OrderRefundEligibilityService {
             status = Status.POLICY_REVIEW_REQUIRED;
             message = "배송 기록이 있어 배송 상태별 취소 정책을 확인해야 합니다.";
         } else {
-            var orderItems = items.findByOrder(order);
             // 주문 품목이 없거나 조립 품목이 섞인 주문에는 일반상품 전액 환불 기준을 적용하지 않습니다.
             if (orderItems.isEmpty()) {
                 message = "환불 대상을 확인할 주문 품목이 없습니다.";
@@ -110,6 +115,7 @@ public class OrderRefundEligibilityService {
 
         // 화면에는 실행 가능 여부만 전달합니다. 사전 조회 중에는 결제사에 접속하지 않습니다.
         return new OrderRefundPreview(order.getOrderNumber(), paidAmount, payment.getPaymentStatus(),
-                remainingAmount, status, message, gateways.getIfAvailable() != null);
+                remainingAmount, status, message, gateways.getIfAvailable() != null,
+                payment.getPgProvider(), payment.getPaymentMethod(), previewItems);
     }
 }

@@ -25,16 +25,20 @@ public interface OrderRepository extends JpaRepository<Order, Integer> {
     // 로그인 회원의 주문만 찾고, 결제 기록이 없는 주문도 목록에 남깁니다.
     // 결제 전에는 주문 확정 시각이 없으므로 주문을 생성한 시각을 사용합니다.
     @Query("""
-            select new com.green.keyboard_project.dto.order.MyOrderSummary(
-                o.orderNumber, coalesce(o.orderedAt, o.createdAt), p.paidAmount, o.orderStatus, p.paymentStatus
+            select new com.green.keyboard_project.dto.order.MyOrderSummary$Header(
+                o.orderId, o.orderNumber, coalesce(o.orderedAt, o.createdAt), p.paidAmount,
+                o.orderStatus, p.paymentStatus, d.deliveryStatus
             )
             from Order o
             join o.user u
             left join Payment p on p.order = o
+            left join OrderDelivery d on d.order = o
             where u.userId = :userId and u.isDeleted = false
+                and (:orderNumber is null or o.orderNumber = :orderNumber)
             order by coalesce(o.orderedAt, o.createdAt) desc, o.orderId desc
             """)
-    List<MyOrderSummary> findMyOrderSummaries(@Param("userId") int userId);
+    List<MyOrderSummary.Header> findMyOrderSummaries(@Param("userId") int userId,
+                                                   @Param("orderNumber") String orderNumber);
 
     // 전체 주문 목록 최신 등록일시 내림차순 조회
     List<Order> findAllByOrderByCreatedAtDesc();
