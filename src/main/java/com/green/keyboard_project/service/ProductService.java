@@ -115,8 +115,7 @@ public class ProductService {
     }
 
     public ProductResponseDto getProductById(int productId) {
-        Product product = productRepository.findById(productId)
-                .filter(p -> !p.isDeleted() && p.isActive() && p.getStockQuantity() > 0)
+        Product product = productRepository.findActiveDetailById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다. (ID: " + productId + ")"));
         List<ProductImage> galleryEntities = productImageRepository.findByProduct_ProductIdOrderByDisplayOrderAsc(productId);
         ProductSpec spec = productSpecRepository.findById(productId).orElse(null);
