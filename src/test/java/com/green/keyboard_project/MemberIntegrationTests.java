@@ -126,9 +126,11 @@ class MemberIntegrationTests {
         for (String path : List.of("/api/users/me/verify-password", "/api/users/me")) {
             var matches = mappings.entrySet().stream()
                     .filter(entry -> entry.getKey().getPatternValues().contains(path)).toList();
-            assertThat(matches).hasSize(1);
-            assertThat(matches.getFirst().getValue().getBeanType())
-                    .isEqualTo(com.green.keyboard_project.controller.UserController.class);
+            // 같은 경로에 HTTP 메서드별 API가 여러 개일 수 있으므로(DELETE 탈퇴, PATCH 회원정보 수정)
+            // 개수 대신 모든 매핑이 UserController에 있는지 확인합니다.
+            assertThat(matches).isNotEmpty();
+            assertThat(matches).allSatisfy(entry -> assertThat(entry.getValue().getBeanType())
+                    .isEqualTo(com.green.keyboard_project.controller.UserController.class));
         }
         var controllerOnly = MockMvcBuilders.webAppContextSetup(context).build();
         controllerOnly.perform(delete("/api/users/me").contentType("application/json").content("{"))

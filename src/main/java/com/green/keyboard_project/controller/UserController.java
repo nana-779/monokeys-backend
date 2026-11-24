@@ -2,6 +2,7 @@
 package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.*;
+import com.green.keyboard_project.dto.auth.UserResponse;
 import com.green.keyboard_project.service.UserService;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
 import com.green.keyboard_project.security.AuthCookieFactory;
@@ -99,5 +100,19 @@ public class UserController {
                         cookies.expiredRefreshCookie().toString()
                 )
                 .body(ApiResponse.ok());
+    }
+
+    // 회원정보 수정 (이름·전화번호·기본 배송지)
+    @PatchMapping("/api/users/me")
+    public ApiResponse<UserResponse> updateProfile(
+            @AuthenticationPrincipal Integer userId,
+            @Valid @RequestBody ProfileUpdateRequest request
+    ) {
+        return ApiResponse.ok(
+                users.updateProfile(
+                        userId(userId),
+                        request
+                )
+        );
     }
 }
