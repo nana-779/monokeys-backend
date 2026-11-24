@@ -95,6 +95,11 @@ public class CartService {
         if (request.getManualBuildId() != null) {
             ManualBuild manualBuild = manualBuildRepository.findById(request.getManualBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("커스텀 빌드를 찾을 수 없습니다."));
+
+            if (manualBuild.getUser() != null && manualBuild.getUser().getUserId() != user.getUserId()) {
+                throw new InvalidStateException("본인이 생성한 커스텀 빌드만 장바구니에 담을 수 있습니다.");
+            }
+
             List<Product> parts = getManualBuildProducts(manualBuild.getManualBuildId());
             Optional<CartItem> existing = cartItemRepository.findByUserAndManualBuild(user, manualBuild);
             addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setManualBuild(manualBuild));
@@ -104,6 +109,11 @@ public class CartService {
         if (request.getAutoBuildId() != null) {
             AutoBuild autoBuild = autoBuildRepository.findById(request.getAutoBuildId())
                     .orElseThrow(() -> new ResourceNotFoundException("추천 빌드를 찾을 수 없습니다."));
+
+            if (autoBuild.getUser() != null && autoBuild.getUser().getUserId() != user.getUserId()) {
+                throw new InvalidStateException("본인이 생성한 커스텀 빌드만 장바구니에 담을 수 있습니다.");
+            }
+            
             List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
             Optional<CartItem> existing = cartItemRepository.findByUserAndAutoBuild(user, autoBuild);
             addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setAutoBuild(autoBuild));
