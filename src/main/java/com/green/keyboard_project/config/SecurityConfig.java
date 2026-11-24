@@ -46,6 +46,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/logout", "/api/auth/refresh").permitAll()
                         .requestMatchers("/api/users/signup", "/api/auth/check-email").permitAll()
                         .requestMatchers("/api/auth/me").authenticated()
+                        // 회원정보 수정·비밀번호 변경·비밀번호 재확인·회원탈퇴는 로그인한 회원만 접근합니다.
+                        .requestMatchers("/api/users/me", "/api/users/me/**").authenticated()
                         // 마이페이지 주문 목록은 인증된 회원에게만 열어 둡니다.
                         .requestMatchers(HttpMethod.POST, "/api/orders/me/{orderNumber}/receipt").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/orders/me", "/api/orders/me/{orderNumber}").authenticated()
