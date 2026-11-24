@@ -20,13 +20,19 @@ public record SignupRequest(
     @NotBlank(message = "이름을 입력해 주세요.")
     @Size(max = 50, message = "이름은 50자 이하로 입력해 주세요.") String name,
     @NotBlank(message = "연락처를 입력해 주세요.")
-    @Pattern(regexp = "010[0-9]{8}", message = "010으로 시작하는 11자리 번호를 입력해 주세요.") String phoneNumber,
+    @Pattern(regexp = PHONE_PATTERN, message = PHONE_FORMAT_MESSAGE) String phoneNumber,
     @NotNull(message = "기본 배송지를 입력해 주세요.") @Valid AddressRequest defaultAddress,
     @NotNull(message = TERMS_REQUIRED_MESSAGE) @Valid TermsConsent termsConsent
 ) {
     public static final String EMAIL_PATTERN = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
     public static final String EMAIL_FORMAT_MESSAGE = "올바른 이메일 형식으로 입력해 주세요.";
     static final String TERMS_REQUIRED_MESSAGE = "필수 약관에 모두 동의해 주세요.";
+
+    // 회원가입·회원정보 수정이 같은 전화번호 규칙을 쓰도록 공용 상수로 둡니다.
+    // DB에는 하이픈 없이 010으로 시작하는 숫자 11자리만 저장합니다.
+    public static final String PHONE_PATTERN = "010[0-9]{8}";
+    public static final String PHONE_FORMAT_MESSAGE = "010으로 시작하는 11자리 번호를 입력해 주세요.";
+    public static final String PASSWORD_POLICY_MESSAGE = "비밀번호는 8~20자이며 영문과 숫자를 포함해야 합니다.";
 
     // 기존 중첩 배송지 형식과 팀 화면의 평면 형식을 하나의 DTO로 맞춰 서비스의 저장 흐름을 공유합니다.
     // 두 형식이 함께 오면 어느 값을 쓸지 임의로 선택하지 않고 잘못된 요청으로 거부합니다.
@@ -56,10 +62,18 @@ public record SignupRequest(
 
     // 화면에서 보는 글자 수와 BCrypt에 전달할 UTF-8 바이트 수를 각각 확인합니다.
     // 같은 글자 수라도 한글·이모지는 바이트 수가 달라지므로 BCrypt의 72바이트 한도를 별도로 지킵니다.
-    @AssertTrue(message = "비밀번호는 8~20자이며 영문과 숫자를 포함해야 합니다.")
+    @AssertTrue(message = PASSWORD_POLICY_MESSAGE)
     public boolean isPasswordPolicyValid() {
         if (password == null || password.isBlank()) {
             return true;
+        }
+        return meetsPasswordPolicy(password);
+    }
+
+    // 회원가입·비밀번호 변경이 같은 비밀번호 규칙을 쓰도록 공용 메서드로 둡니다.
+    public static boolean meetsPasswordPolicy(String password) {
+        if (password == null) {
+            return false;
         }
         int length = password.codePointCount(0, password.length());
         return length >= 8 && length <= 20
