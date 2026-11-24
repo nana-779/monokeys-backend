@@ -144,24 +144,29 @@ public class ProductService {
 
         List<ProductResponseDto.MediaDto> images = new ArrayList<>();
         List<String> gallery = new ArrayList<>();
+        List<String> orderedUrls = new ArrayList<>();
 
-        if (galleryEntities != null && !galleryEntities.isEmpty()) {
-            for (int i = 0; i < galleryEntities.size(); i++) {
-                String url = galleryEntities.get(i).getImageUrl();
-                images.add(ProductResponseDto.MediaDto.builder()
-                        .id(p.getProductId() + "-" + i)
-                        .url(url)
-                        .alt(p.getName() + " 이미지 " + (i + 1))
-                        .build());
-                gallery.add(url);
+        // 관리자에서 thumbnailUrl을 교체한 경우 기존 product_image보다 대표 썸네일을 우선 노출
+        if (!thumb.isBlank()) {
+            orderedUrls.add(thumb);
+        }
+        if (galleryEntities != null) {
+            for (ProductImage entity : galleryEntities) {
+                String url = entity.getImageUrl();
+                if (url != null && !url.isBlank() && !orderedUrls.contains(url)) {
+                    orderedUrls.add(url);
+                }
             }
-        } else if (!thumb.isBlank()) {
+        }
+
+        for (int i = 0; i < orderedUrls.size(); i++) {
+            String url = orderedUrls.get(i);
             images.add(ProductResponseDto.MediaDto.builder()
-                    .id(p.getProductId() + "-0")
-                    .url(thumb)
-                    .alt(p.getName())
+                    .id(p.getProductId() + "-" + i)
+                    .url(url)
+                    .alt(orderedUrls.size() == 1 ? p.getName() : p.getName() + " 이미지 " + (i + 1))
                     .build());
-            gallery.add(thumb);
+            gallery.add(url);
         }
 
         String layout = null;

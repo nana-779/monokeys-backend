@@ -7,12 +7,14 @@ import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.exceptions.*;
 import com.green.keyboard_project.repository.AddressRepository;
 import com.green.keyboard_project.repository.UserRepository;
+import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.security.WithdrawalAuth;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -24,13 +26,22 @@ public class UserService {
     private final AddressRepository addresses;
     private final ObjectProvider<WithdrawalAuth> authentication;
     private final PasswordEncoder passwords;
+    private final CartItemRepository cartItemRepository;
 
+    @Autowired
     public UserService(UserRepository users, AddressRepository addresses,
-                       ObjectProvider<WithdrawalAuth> authentication, PasswordEncoder passwords) {
+                       ObjectProvider<WithdrawalAuth> authentication, PasswordEncoder passwords, CartItemRepository cartItemRepository) {
         this.users = users;
         this.addresses = addresses;
         this.authentication = authentication;
         this.passwords = passwords;
+        this.cartItemRepository = cartItemRepository;
+    }
+
+    // 기존 테스트 코드 호환용 보조 생성자
+    public UserService(UserRepository users, AddressRepository addresses,
+                       ObjectProvider<WithdrawalAuth> authentication, PasswordEncoder passwords) {
+        this(users, addresses, authentication, passwords, null);
     }
 
     private static LocalDateTime now() { return LocalDateTime.now(ZoneId.of("Asia/Seoul")); }
@@ -105,6 +116,10 @@ public class UserService {
         user.setDeletedAt(now());
         user.setUpdatedAt(user.getDeletedAt());
         auth.revokeRefreshTokens(userId);
+
+        if (cartItemRepository != null) {
+            cartItemRepository.deleteByUser(user);
+        }
     }
 
     private WithdrawalAuth requirePasswordMember(User user) {
