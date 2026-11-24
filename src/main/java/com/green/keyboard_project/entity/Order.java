@@ -59,6 +59,15 @@ public class Order {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "postal_code", nullable = false, length = 10)
+    private String postalCode;
+
+    @Column(name = "road_address", nullable = false, length = 255)
+    private String roadAddress;
+
+    @Column(name = "detail_address", nullable = false, length = 255)
+    private String detailAddress;
+
     public enum OrderStatusType {
         PENDING, ORDERED, CANCELLED, CONFIRMED
     }
