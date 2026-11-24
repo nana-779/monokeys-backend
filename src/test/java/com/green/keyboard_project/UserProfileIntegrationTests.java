@@ -208,7 +208,9 @@ class UserProfileIntegrationTests {
         for (String body : List.of(
                 "{\"currentPassword\":\"Keyboard123\",\"newPassword\":\"short1\"}",          // 8자 미만
                 "{\"currentPassword\":\"Keyboard123\",\"newPassword\":\"onlyletters\"}",     // 숫자 없음
-                "{\"currentPassword\":\"Keyboard123\",\"newPassword\":\"Keyboard123\"}")) {  // 현재와 같음
+                "{\"currentPassword\":\"Keyboard123\",\"newPassword\":\"Keyboard123\"}",   // 현재와 같음
+                // 20자 이내지만 이모지(1자 4바이트)로 UTF-8 72바이트 초과: 2 + 18×4 = 74바이트
+                "{\"currentPassword\":\"Keyboard123\",\"newPassword\":\"a1" + "\uD83D\uDE00".repeat(18) + "\"}")) {
             controller.perform(patch("/api/users/me/password").contentType("application/json").content(body))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.success").value(false));
