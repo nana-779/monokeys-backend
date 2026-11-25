@@ -2,6 +2,7 @@
 package com.green.keyboard_project.controller;
 
 import com.green.keyboard_project.dto.*;
+import com.green.keyboard_project.dto.auth.UserResponse;
 import com.green.keyboard_project.service.UserService;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
 import com.green.keyboard_project.security.AuthCookieFactory;
@@ -89,6 +90,45 @@ public class UserController {
         );
 
         // 탈퇴 성공 시 Access / Refresh 쿠키 만료
+        return ResponseEntity.ok()
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        cookies.expiredAccessCookie().toString()
+                )
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        cookies.expiredRefreshCookie().toString()
+                )
+                .body(ApiResponse.ok());
+    }
+
+    // 회원정보 수정 (이름·전화번호·기본 배송지)
+    @PatchMapping("/api/users/me")
+    public ApiResponse<UserResponse> updateProfile(
+            @AuthenticationPrincipal Integer userId,
+            @Valid @RequestBody ProfileUpdateRequest request
+    ) {
+        return ApiResponse.ok(
+                users.updateProfile(
+                        userId(userId),
+                        request
+                )
+        );
+    }
+
+    // 비밀번호 변경
+    @PatchMapping("/api/users/me/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @AuthenticationPrincipal Integer userId,
+            @Valid @RequestBody PasswordChangeRequest request
+    ) {
+        // 비밀번호 변경 처리
+        users.changePassword(
+                userId(userId),
+                request
+        );
+
+        // 변경 성공 시 Access / Refresh 쿠키 만료 (새 비밀번호로 다시 로그인)
         return ResponseEntity.ok()
                 .header(
                         HttpHeaders.SET_COOKIE,

@@ -1,7 +1,10 @@
 package com.green.keyboard_project.service;
 
+import com.green.keyboard_project.dto.PasswordChangeRequest;
+import com.green.keyboard_project.dto.ProfileUpdateRequest;
 import com.green.keyboard_project.dto.SignupRequest;
 import com.green.keyboard_project.dto.SignupResponse;
+import com.green.keyboard_project.dto.auth.UserResponse;
 import com.green.keyboard_project.entity.Address;
 import com.green.keyboard_project.entity.User;
 import com.green.keyboard_project.exceptions.*;
@@ -12,6 +15,7 @@ import com.green.keyboard_project.security.WithdrawalAuth;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -120,6 +124,50 @@ public class UserService {
         if (cartItemRepository != null) {
             cartItemRepository.deleteByUser(user);
         }
+    }
+
+    // 회원정보 수정: 회원 이름·전화번호와 기본 배송지(주소·수령인)를 한 트랜잭션에서 함께 바꿉니다.
+    // 회원가입이 회원 이름·전화번호를 기본 배송지 수령인으로 저장하므로 수정할 때도 같이 맞춥니다.
+    @Transactional
+    public UserResponse updateProfile(int userId, ProfileUpdateRequest request) {
+        User user = users.findById(userId).orElseThrow(UserService::inactive);
+        if (user.isDeleted()) { throw inactive(); }
+        Address address = addresses.findByUser_UserIdAndIsDefaultTrue(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("기본 배송지를 찾을 수 없습니다."));
+
+        // 바뀐 값이 없으면 저장하지 않고 수정 일시도 그대로 둡니다.
+        boolean changed = !Objects.equals(request.name(), user.getName())
+            || !Objects.equals(request.phoneNumber(), user.getPhoneNumber())
+            || !Objects.equals(request.name(), address.getRecipientName())
+            || !Objects.equals(request.phoneNumber(), address.getRecipientPhone())
+            || !Objects.equals(request.postalCode(), address.getPostalCode())
+            || !Objects.equals(request.address(), address.getRoadAddress())
+            || !Objects.equals(request.detailAddress(), address.getDetailAddress());
+        if (changed) {
+            user.setName(request.name());
+            user.setPhoneNumber(request.phoneNumber());
+            user.setUpdatedAt(now());
+            address.setRecipientName(request.name());
+            address.setRecipientPhone(request.phoneNumber());
+            address.setPostalCode(request.postalCode());
+            address.setRoadAddress(request.address());
+            address.setDetailAddress(request.detailAddress());
+        }
+        return UserResponse.from(user, address);
+    }
+
+    // 비밀번호 변경: 현재 비밀번호를 확인한 뒤 바꾸고, Refresh Token을 지워 새 비밀번호로 다시 로그인하게 합니다.
+    // 탈퇴와 같은 본인 확인(requirePasswordMember)과 토큰 삭제(revokeRefreshTokens)를 재사용합니다.
+    @Transactional
+    public void changePassword(int userId, PasswordChangeRequest request) {
+        User user = users.findById(userId).orElseThrow(UserService::inactive);
+        WithdrawalAuth auth = requirePasswordMember(user);
+        if (!passwords.matches(request.currentPassword(), user.getPassword())) {
+            throw new AuthorizationFailureException("현재 비밀번호가 일치하지 않습니다.");
+        }
+        user.setPassword(passwords.encode(request.newPassword()));
+        user.setUpdatedAt(now());
+        auth.revokeRefreshTokens(userId);
     }
 
     private WithdrawalAuth requirePasswordMember(User user) {
