@@ -13,7 +13,9 @@ import lombok.Setter;
 @Getter
 @Setter
 public class CartAddRequest {
-    private Integer productId;
-    private Integer quantity;
-    private String customDesignData;
+    private Integer productId;      // 일반 상품 ID (커스텀일 땐 null)
+    private Integer manualBuildId;  // 수동 커스텀 빌드 ID (추가)
+    private Integer autoBuildId;    // 자동 추천 빌드 ID (추가)
+    private Integer quantity;       // 수량
+    private String customDesignData; // 커스텀 키캡 전용
 }

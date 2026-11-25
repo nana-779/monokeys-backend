@@ -44,24 +44,42 @@ public class CartController {
         if (userId == null) {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
-        if (request.getProductId() == null) {
-            throw new ResourceNotFoundException("존재하지 않는 상품입니다.");
+
+        // 1. 전달된 ID 개수 카운트
+        int idCount = 0;
+        if (request.getProductId() != null) idCount++;
+        if (request.getManualBuildId() != null) idCount++;
+        if (request.getAutoBuildId() != null) idCount++;
+        // 아무것도 안 보낸 경우 차단
+        if (idCount == 0) {
+            throw new ResourceNotFoundException("추가할 상품 정보가 없습니다.");
         }
+
+        // 2개 이상의 id를 받았을 경우 차단
+        if (idCount > 1) {
+            throw new InvalidStateException("일반 상품, 수동 빌드, 자동 추천 빌드 중 정확히 1종류만 지정해야 합니다.");
+        }
+
+        if (request.getProductId() == null && request.getManualBuildId() == null && request.getAutoBuildId() == null) {
+            throw new ResourceNotFoundException("추가할 상품 정보가 없습니다.");
+        }
+
         if (request.getQuantity() == null) {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
 
-        cartService.addCartItem(userId, request.getProductId(), request.getQuantity(), request.getCustomDesignData());
+        // DTO 객체 전달
+        cartService.addCartItem(userId, request);
         return ResponseEntity.ok(ApiResponse.ok("장바구니에 추가되었습니다."));
     }
 
     /**
-     * 3. 장바구니 수량 변경 (PATCH /api/cart/{productId})
+     * 3. 장바구니 수량 변경 (PATCH /api/cart/{targetId})
      */
-    @PatchMapping("/{productId}")
+    @PatchMapping("/{targetId}")
     public ResponseEntity<ApiResponse<String>> updateCartItemQuantity(
             @AuthenticationPrincipal Integer userId,
-            @PathVariable int productId,
+            @PathVariable int targetId,
             @RequestBody CartQuantityUpdateRequest request
     ) {
         if (userId == null) {
@@ -70,56 +88,22 @@ public class CartController {
         if (request.getQuantity() == null) {
             throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
         }
-        cartService.updateCartItemQuantity(userId, productId, request.getQuantity());
+        cartService.updateCartItemQuantity(userId, targetId, request.getQuantity());
         return ResponseEntity.ok(ApiResponse.ok("수량이 변경되었습니다."));
     }
 
     /**
-     * 3-1. 장바구니 개별 행(커스텀 디자인 구분) 수량 변경 (PATCH /api/cart/items/{cartItemId})
+     * 4. 장바구니 상품 단건 삭제 (DELETE /api/cart/{targetId})
      */
-    @PatchMapping("/items/{cartItemId}")
-    public ResponseEntity<ApiResponse<String>> updateCartItemQuantityById(
-            @AuthenticationPrincipal Integer userId,
-            @PathVariable int cartItemId,
-            @RequestBody CartQuantityUpdateRequest request
-    ) {
-        if (userId == null) {
-            throw new UnauthenticatedException("로그인이 필요합니다.");
-        }
-        if (request.getQuantity() == null) {
-            throw new InvalidStateException("유효하지 않은 상품 갯수 입니다.");
-        }
-        cartService.updateCartItemQuantityById(userId, cartItemId, request.getQuantity());
-        return ResponseEntity.ok(ApiResponse.ok("수량이 변경되었습니다."));
-    }
-
-    /**
-     * 4. 장바구니 상품 단건 삭제 (DELETE /api/cart/{productId})
-     */
-    @DeleteMapping("/{productId}")
+    @DeleteMapping("/{targetId}")
     public ResponseEntity<ApiResponse<String>> removeCartItem(
             @AuthenticationPrincipal Integer userId,
-            @PathVariable int productId
+            @PathVariable int targetId
     ) {
         if (userId == null) {
             throw new UnauthenticatedException("로그인이 필요합니다.");
         }
-        cartService.removeCartItem(userId, productId);
-        return ResponseEntity.ok(ApiResponse.ok("장바구니에서 삭제되었습니다."));
-    }
-
-    /**
-     * 4-1. 장바구니 개별 행(커스텀 디자인 구분) 단건 삭제 (DELETE /api/cart/items/{cartItemId})
-     */
-    @DeleteMapping("/items/{cartItemId}")
-    public ResponseEntity<ApiResponse<String>> removeCartItemById(
-            @AuthenticationPrincipal Integer userId,
-            @PathVariable int cartItemId
-    ) {
-        if (userId == null) {
-            throw new UnauthenticatedException("로그인이 필요합니다.");
-        }
-        cartService.removeCartItemById(userId, cartItemId);
+        cartService.removeCartItem(userId, targetId);
         return ResponseEntity.ok(ApiResponse.ok("장바구니에서 삭제되었습니다."));
     }
 
