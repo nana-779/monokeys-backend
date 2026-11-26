@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
@@ -45,6 +46,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/logout", "/api/auth/refresh").permitAll()
                         .requestMatchers("/api/users/signup", "/api/auth/check-email").permitAll()
+                        // 신규 회원이 로그인 전에 인증번호를 발급하고 검증할 수 있습니다.
+                        .requestMatchers(HttpMethod.POST, "/api/auth/email/send", "/api/auth/email/verify").permitAll()
                         .requestMatchers("/api/auth/me").authenticated()
                         // 회원정보 수정·비밀번호 변경·비밀번호 재확인·회원탈퇴는 로그인한 회원만 접근합니다.
                         .requestMatchers("/api/users/me", "/api/users/me/**").authenticated()
@@ -77,6 +80,8 @@ public class SecurityConfig {
         config.setAllowedOriginPatterns(List.of(allowedOrigin, "http://127.0.0.1:3000"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        // 다른 출처의 가입 화면에서도 429 응답에 담긴 서버의 재요청 대기 시간을 읽을 수 있게 합니다.
+        config.addExposedHeader(HttpHeaders.RETRY_AFTER);
         config.setAllowCredentials(true); // 쿠키 전달 허용 (허용 주소에 * 사용 불가)
         config.setMaxAge(3600L);
 
