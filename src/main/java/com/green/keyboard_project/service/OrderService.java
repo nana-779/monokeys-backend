@@ -118,16 +118,15 @@ public class OrderService {
                 throw new InvalidStateException(product.getName() + "은(는) 현재 판매중인 상품이 아닙니다.");
             }
 
-            cartItemRepository.findByUserAndProduct(user, product)
-                    .orElseThrow(() -> new InvalidStateException(product.getName() + "은(는) 장바구니에 담겨있지 않은 상품입니다."));
+            List<CartItem> cartItems = cartItemRepository.findAllByUserAndProduct(user, product);
+            if (cartItems.isEmpty()) {
+                throw new InvalidStateException(product.getName() + "은(는) 장바구니에 담겨있지 않은 상품입니다.");
+            }
 
-            // 재고 수량 확인
+            // 재고 수량 확인 (주문서 생성 시에는 재고 차감하지 않고 보유 수량만 검증)
             if (product.getStockQuantity() < itemReq.getQuantity()) {
                 throw new InvalidStateException("상품 재고가 부족합니다. (" + product.getName() + ", 현재 재고: " + product.getStockQuantity() + "개)");
             }
-
-            // 재고 차감 반영 (JPA Dirty Checking으로 트랜잭션 종료 시 자동 UPDATE)
-            product.setStockQuantity(product.getStockQuantity() - itemReq.getQuantity());
 
             // 단가 및 소계 계산
             int lineAmount = product.getBasePrice() * itemReq.getQuantity();
@@ -296,6 +295,18 @@ public class OrderService {
                 order.getFinalPayAmount()
         );
 
+        // 1-1. 결제 승인 완료 시점에 실제 재고 차감 반영
+        List<OrderItem> items = orderItemRepository.findByOrder(order);
+        for (OrderItem item : items) {
+            Product product = item.getProduct();
+            if (product != null) {
+                if (product.getStockQuantity() < item.getQuantity()) {
+                    throw new InvalidStateException("상품 재고가 부족하여 결제를 완료할 수 없습니다. (" + product.getName() + ")");
+                }
+                product.setStockQuantity(product.getStockQuantity() - item.getQuantity());
+            }
+        }
+
         // 2. 주문 상태를 결제 완료(ORDERED)로 변경 및 결제 승인 시각 기록
         order.setOrderStatus(Order.OrderStatusType.ORDERED);
         order.setOrderedAt(LocalDateTime.now());
@@ -323,24 +334,16 @@ public class OrderService {
             cartItemRepository.deleteByUser(order.getUser());
         }
 
-        List<OrderItem> items = orderItemRepository.findByOrder(order);
         return toOrderResponse(order, items);
     }
 
     /**
-     * 결제 실패 시 주문 취소 및 차감된 재고 복구
+     * 결제 실패 또는 중간 취소 시 주문 상태를 CANCELLED(취소됨)로 변경
      */
     @Transactional
     public void failPayment(String orderNumber, String reason) {
         orderRepository.findByOrderNumber(orderNumber).ifPresent(order -> {
             if (order.getOrderStatus() == Order.OrderStatusType.PENDING) {
-                List<OrderItem> items = orderItemRepository.findByOrder(order);
-                for (OrderItem item : items) {
-                    Product product = item.getProduct();
-                    if (product != null) {
-                        product.setStockQuantity(product.getStockQuantity() + item.getQuantity());
-                    }
-                }
                 order.setOrderStatus(Order.OrderStatusType.CANCELLED);
                 orderRepository.save(order);
             }
