@@ -42,7 +42,9 @@ public class CartService {
      */
     @Transactional(readOnly = true)
     public List<CartItemResponse> getCartItems(int userId) {
+        // 한 번의 쿼리로 사용자의 장바구니 항복을 모두 조회
         List<CartItem> items = cartItemRepository.findByUser_UserId(userId);
+
         return items.stream().map(item -> {
             CartItemResponse.CartItemResponseBuilder builder = CartItemResponse.builder()
                     .cartItemId(item.getCartItemId())
@@ -55,7 +57,8 @@ public class CartService {
 
             // [A] 일반 단품 및 커스텀 키캡 상품
             if (product != null) {
-                int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), item.getCartItemId());
+                // 이전에 조회된 items 리스트를 전달하여 추가 DB 쿼리를 발생시키지 않음
+                int usedByOthers = calculateUsedQuantityInMemory(items, product.getProductId(), item.getCartItemId());
                 int remainingStock = Math.max(0, product.getStockQuantity() - usedByOthers);
                 return builder.productId(product.getProductId())
                         .name(product.getName())
@@ -461,5 +464,27 @@ public class CartService {
             log.warn("판매하지 않는 상품 장바구니 요청. productId={}", product.getProductId());
             throw new InvalidStateException("판매하지 않는 상품입니다.");
         }
+    }
+
+    /**
+     * 이미 DB에서 조회한 장바구니 목록에서 특정 상품의 수량을 계산하는 메서드
+     */
+    private int calculateUsedQuantityInMemory(List<CartItem> userItems, int productId, Integer excludeCartItemId) {
+        int totalUsed = 0;
+        for (CartItem item : userItems) {
+            if (excludeCartItemId != null && item.getCartItemId() == excludeCartItemId) {
+                continue;
+            }
+            if (item.getProduct() != null && item.getProduct().getProductId() == productId) {
+                totalUsed += item.getQuantity();
+            } else if (item.getManualBuild() != null || item.getAutoBuild() != null) {
+                boolean contains = getBuildProducts(item).stream()
+                        .anyMatch(p -> p.getProductId() == productId);
+                if (contains) {
+                    totalUsed += item.getQuantity();
+                }
+            }
+        }
+        return totalUsed;
     }
 }
