@@ -16,11 +16,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -39,11 +45,12 @@ public class CartService {
 
     /**
      * 회원의 장바구니 목록 조회 (GET /api/cart)
+     * - 장바구니 항목·빌드 부품·품목별 사용 수량을 일괄 로드해 N+1 쿼리를 방지합니다.
      */
     @Transactional(readOnly = true)
     public List<CartItemResponse> getCartItems(int userId) {
-        List<CartItem> items = cartItemRepository.findByUser_UserId(userId);
-        return items.stream().map(item -> {
+        CartSnapshot snapshot = loadCartSnapshot(userId);
+        return snapshot.items().stream().map(item -> {
             CartItemResponse.CartItemResponseBuilder builder = CartItemResponse.builder()
                     .cartItemId(item.getCartItemId())
                     .userId(userId)
@@ -55,8 +62,7 @@ public class CartService {
 
             // [A] 일반 단품 및 커스텀 키캡 상품
             if (product != null) {
-                int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), item.getCartItemId());
-                int remainingStock = Math.max(0, product.getStockQuantity() - usedByOthers);
+                int remainingStock = snapshot.availableStock(product, item);
                 return builder.productId(product.getProductId())
                         .name(product.getName())
                         .price(product.getBasePrice())
@@ -68,8 +74,8 @@ public class CartService {
 
             // [B] 수동 커스텀 키보드 빌드
             if (manualBuild != null) {
-                List<Product> parts = getManualBuildProducts(manualBuild.getManualBuildId());
-                return populateBuildResponse(builder, parts, userId, item.getCartItemId())
+                List<Product> parts = snapshot.partsOf(item);
+                return populateBuildResponse(builder, snapshot, parts, item)
                         .manualBuildId(manualBuild.getManualBuildId())
                         .buildType("MANUAL")
                         .name(manualBuild.getBuildName())
@@ -80,8 +86,8 @@ public class CartService {
 
             // [C] 자동 추천 키보드 빌드
             if (autoBuild != null) {
-                List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
-                return populateBuildResponse(builder, parts, userId, item.getCartItemId())
+                List<Product> parts = snapshot.partsOf(item);
+                return populateBuildResponse(builder, snapshot, parts, item)
                         .autoBuildId(autoBuild.getAutoBuildId())
                         .buildType("AUTO")
                         .name(autoBuild.getBuildName())
@@ -101,6 +107,7 @@ public class CartService {
     public void addCartItem(int userId, CartAddRequest request) {
         User user = findUser(userId);
         int quantity = (request.getQuantity() != null && request.getQuantity() > 0) ? request.getQuantity() : 1;
+        CartSnapshot snapshot = loadCartSnapshot(userId);
 
         // [A] 수동 커스텀 키보드 빌드 저장
         if (request.getManualBuildId() != null) {
@@ -111,9 +118,14 @@ public class CartService {
                 throw new InvalidStateException("본인이 생성한 커스텀 빌드만 장바구니에 담을 수 있습니다.");
             }
 
-            List<Product> parts = getManualBuildProducts(manualBuild.getManualBuildId());
-            Optional<CartItem> existing = cartItemRepository.findByUserAndManualBuild(user, manualBuild);
-            addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setManualBuild(manualBuild));
+            Optional<CartItem> existing = snapshot.items().stream()
+                    .filter(i -> i.getManualBuild() != null
+                            && i.getManualBuild().getManualBuildId() == manualBuild.getManualBuildId())
+                    .findFirst();
+            List<Product> parts = snapshot.manualProductsByBuildId().containsKey(manualBuild.getManualBuildId())
+                    ? snapshot.manualProductsByBuildId().get(manualBuild.getManualBuildId())
+                    : getManualBuildProducts(manualBuild.getManualBuildId());
+            addOrUpdateBuildItem(user, snapshot, existing, parts, quantity, item -> item.setManualBuild(manualBuild));
             return;
         }
 
@@ -126,9 +138,14 @@ public class CartService {
                 throw new InvalidStateException("본인이 생성한 커스텀 빌드만 장바구니에 담을 수 있습니다.");
             }
 
-            List<Product> parts = getAutoBuildProducts(autoBuild.getAutoBuildId());
-            Optional<CartItem> existing = cartItemRepository.findByUserAndAutoBuild(user, autoBuild);
-            addOrUpdateBuildItem(user, existing, parts, quantity, item -> item.setAutoBuild(autoBuild));
+            Optional<CartItem> existing = snapshot.items().stream()
+                    .filter(i -> i.getAutoBuild() != null
+                            && i.getAutoBuild().getAutoBuildId() == autoBuild.getAutoBuildId())
+                    .findFirst();
+            List<Product> parts = snapshot.autoProductsByBuildId().containsKey(autoBuild.getAutoBuildId())
+                    ? snapshot.autoProductsByBuildId().get(autoBuild.getAutoBuildId())
+                    : getAutoBuildProducts(autoBuild.getAutoBuildId());
+            addOrUpdateBuildItem(user, snapshot, existing, parts, quantity, item -> item.setAutoBuild(autoBuild));
             return;
         }
 
@@ -140,18 +157,14 @@ public class CartService {
             String requestDesign = (request.getCustomDesignData() != null && !request.getCustomDesignData().isBlank())
                     ? request.getCustomDesignData().trim() : null;
 
-            // 1. 해당 유저가 담은 이 상품(product)의 모든 장바구니 항목 조회
-            List<CartItem> userProductItems = cartItemRepository.findAllByUserAndProduct(user, product);
-
-            // 2. 동일한 디자인(또는 둘 다 디자인 없는 일반 상품)인지 확인
-            Optional<CartItem> existingItem = userProductItems.stream()
+            // 1. 이미 로드한 스냅샷에서 동일 상품 행 추출
+            Optional<CartItem> existingItem = snapshot.items().stream()
+                    .filter(item -> item.getProduct() != null && item.getProduct().getProductId() == product.getProductId())
                     .filter(item -> isSameDesign(requestDesign, item.getCustomDesignData()))
                     .findFirst();
 
-            // 3. 재고 계산 (현재 항목 수정 시 자기 자신 제외하고 잔여 재고 계산)
-            Integer excludeId = existingItem.map(CartItem::getCartItemId).orElse(null);
-            int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), excludeId);
-            int availableStock = Math.max(0, product.getStockQuantity() - usedByOthers);
+            // 2. 잔여 재고 계산 (동일 품목 행 제외)
+            int availableStock = snapshot.availableStock(product, existingItem.orElse(null));
 
             if (availableStock <= 0) {
                 throw new InvalidStateException("해당 상품은 현재 품절(또는 커스텀 상품/키보드로 소진)되어 장바구니에 담을 수 없습니다.");
@@ -194,20 +207,22 @@ public class CartService {
      */
     @Transactional
     public void updateCartItemQuantity(int userId, int targetId, int quantity) {
-        User user = findUser(userId);
+        findUser(userId);
         if (quantity <= 0) {
             throw new InvalidStateException("1개 이상의 수량만 지정할 수 있습니다.");
         }
 
-        CartItem item = cartItemRepository.findByCartItemIdAndUser(targetId, user)
+        CartSnapshot snapshot = loadCartSnapshot(userId);
+        CartItem item = snapshot.items().stream()
+                .filter(i -> i.getCartItemId() == targetId)
+                .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("장바구니에 해당 상품이 없습니다."));
 
         // 단품 및 커스텀 키캡 수량 변경 검증
         if (item.getProduct() != null) {
             Product product = item.getProduct();
             validateOnSale(product);
-            int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), item.getCartItemId());
-            int availableStock = Math.max(0, product.getStockQuantity() - usedByOthers);
+            int availableStock = snapshot.availableStock(product, item);
             if (availableStock <= 0) {
                 throw new InvalidStateException("해당 상품의 재고가 모두 소진되었습니다.");
             }
@@ -217,8 +232,8 @@ public class CartService {
         }
         // 커스텀 키보드(수동/자동) 수량 변경 검증
         else if (item.getManualBuild() != null || item.getAutoBuild() != null) {
-            List<Product> parts = getBuildProducts(item);
-            int availableStock = calculateAvailableStockForParts(userId, parts, item.getCartItemId());
+            List<Product> parts = snapshot.partsOf(item);
+            int availableStock = snapshot.availableBuildStock(parts, item);
             if (availableStock <= 0) {
                 throw new InvalidStateException("부품 재고가 모두 소진되었습니다.");
             }
@@ -321,10 +336,9 @@ public class CartService {
     /**
      * 커스텀 빌드 장바구니 추가/수량합산 공통 처리
      */
-    private void addOrUpdateBuildItem(User user, Optional<CartItem> existing, List<Product> parts,
-                                      int quantity, Consumer<CartItem> buildSetter) {
-        Integer excludeId = existing.map(CartItem::getCartItemId).orElse(null);
-        int availableStock = calculateAvailableStockForParts(user.getUserId(), parts, excludeId);
+    private void addOrUpdateBuildItem(User user, CartSnapshot snapshot, Optional<CartItem> existing,
+                                      List<Product> parts, int quantity, Consumer<CartItem> buildSetter) {
+        int availableStock = snapshot.availableBuildStock(parts, existing.orElse(null));
 
         if (availableStock <= 0) {
             throw new InvalidStateException("부품 재고가 부족하여 커스텀 키보드를 담을 수 없습니다.");
@@ -355,27 +369,14 @@ public class CartService {
      * 커스텀 응답 공통 필드(재고, 썸네일, 부품 ID 목록) 설정
      */
     private CartItemResponse.CartItemResponseBuilder populateBuildResponse(
-            CartItemResponse.CartItemResponseBuilder builder, List<Product> parts, int userId, int cartItemId) {
-        int maxStock = calculateAvailableStockForParts(userId, parts, cartItemId);
+            CartItemResponse.CartItemResponseBuilder builder, CartSnapshot snapshot,
+            List<Product> parts, CartItem currentItem) {
+        int maxStock = snapshot.availableBuildStock(parts, currentItem);
         String thumb = extractThumbnail(parts);
         List<Integer> partIds = parts.stream().map(Product::getProductId).toList();
         return builder.stockQuantity(maxStock)
                 .thumbnailUrl(thumb)
                 .partProductIds(partIds);
-    }
-
-    /**
-     * 부품 목록으로부터 현재 담을 수 있는 최대 조립 가능 수량(최솟값) 계산
-     */
-    private int calculateAvailableStockForParts(int userId, List<Product> parts, Integer excludeCartItemId) {
-        return parts.stream()
-                .filter(Objects::nonNull)
-                .mapToInt(p -> {
-                    int usedByOthers = getUsedQuantityInCart(userId, p.getProductId(), excludeCartItemId);
-                    return Math.max(0, p.getStockQuantity() - usedByOthers);
-                })
-                .min()
-                .orElse(0);
     }
 
     /**
@@ -389,20 +390,8 @@ public class CartService {
                 .orElse("");
     }
 
-    /**
-     * 장바구니 아이템의 커스텀 빌드 부품 목록 추출
-     */
-    private List<Product> getBuildProducts(CartItem item) {
-        if (item.getManualBuild() != null) {
-            return getManualBuildProducts(item.getManualBuild().getManualBuildId());
-        } else if (item.getAutoBuild() != null) {
-            return getAutoBuildProducts(item.getAutoBuild().getAutoBuildId());
-        }
-        return Collections.emptyList();
-    }
-
     private List<Product> getManualBuildProducts(int manualBuildId) {
-        return manualBuildItemRepository.findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(manualBuildId)
+        return manualBuildItemRepository.findWithProductByManualBuildIds(List.of(manualBuildId))
                 .stream()
                 .map(ManualBuildItem::getProduct)
                 .filter(Objects::nonNull)
@@ -410,7 +399,7 @@ public class CartService {
     }
 
     private List<Product> getAutoBuildProducts(int autoBuildId) {
-        return autoBuildItemRepository.findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(autoBuildId)
+        return autoBuildItemRepository.findWithProductByAutoBuildIds(List.of(autoBuildId))
                 .stream()
                 .map(AutoBuildItem::getProduct)
                 .filter(Objects::nonNull)
@@ -418,26 +407,103 @@ public class CartService {
     }
 
     /**
-     * 현재 사용자의 장바구니에서 특정 상품(부품)이 사용 중인 총 수량 계산 (일반 단품 + 커스텀 키보드 부품 모두 포함)
+     * 회원의 장바구니 항목·빌드 부품·품목별 사용량을 일괄 조회해 메모리 스냅샷으로 구성합니다.
      */
-    private int getUsedQuantityInCart(int userId, int productId, Integer excludeCartItemId) {
-        List<CartItem> userItems = cartItemRepository.findByUser_UserId(userId);
-        int totalUsed = 0;
-        for (CartItem item : userItems) {
-            if (excludeCartItemId != null && item.getCartItemId() == excludeCartItemId) {
-                continue;
-            }
-            if (item.getProduct() != null && item.getProduct().getProductId() == productId) {
-                totalUsed += item.getQuantity();
-            } else if (item.getManualBuild() != null || item.getAutoBuild() != null) {
-                boolean contains = getBuildProducts(item).stream()
-                        .anyMatch(p -> p.getProductId() == productId);
-                if (contains) {
-                    totalUsed += item.getQuantity();
+    private CartSnapshot loadCartSnapshot(int userId) {
+        List<CartItem> items = cartItemRepository.findWithDetailsByUserId(userId);
+        if (items.isEmpty()) {
+            return new CartSnapshot(List.of(), Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
+        }
+
+        Set<Integer> manualBuildIds = new HashSet<>();
+        Set<Integer> autoBuildIds = new HashSet<>();
+        for (CartItem item : items) {
+            if (item.getManualBuild() != null) manualBuildIds.add(item.getManualBuild().getManualBuildId());
+            if (item.getAutoBuild() != null) autoBuildIds.add(item.getAutoBuild().getAutoBuildId());
+        }
+
+        Map<Integer, List<Product>> manualProductsById = manualBuildIds.isEmpty()
+                ? Collections.emptyMap()
+                : manualBuildItemRepository.findWithProductByManualBuildIds(manualBuildIds).stream()
+                        .filter(m -> m.getProduct() != null)
+                        .collect(Collectors.groupingBy(
+                                m -> m.getManualBuild().getManualBuildId(),
+                                Collectors.mapping(ManualBuildItem::getProduct, Collectors.toList())
+                        ));
+
+        Map<Integer, List<Product>> autoProductsById = autoBuildIds.isEmpty()
+                ? Collections.emptyMap()
+                : autoBuildItemRepository.findWithProductByAutoBuildIds(autoBuildIds).stream()
+                        .filter(a -> a.getProduct() != null)
+                        .collect(Collectors.groupingBy(
+                                a -> a.getAutoBuild().getAutoBuildId(),
+                                Collectors.mapping(AutoBuildItem::getProduct, Collectors.toList())
+                        ));
+
+        Map<Integer, Integer> usedByProduct = new HashMap<>();
+        for (CartItem item : items) {
+            int qty = item.getQuantity();
+            if (item.getProduct() != null) {
+                usedByProduct.merge(item.getProduct().getProductId(), qty, Integer::sum);
+            } else {
+                List<Product> parts = item.getManualBuild() != null
+                        ? manualProductsById.getOrDefault(item.getManualBuild().getManualBuildId(), List.of())
+                        : item.getAutoBuild() != null
+                                ? autoProductsById.getOrDefault(item.getAutoBuild().getAutoBuildId(), List.of())
+                                : List.of();
+                Set<Integer> seenPartIds = new HashSet<>();
+                for (Product part : parts) {
+                    if (part != null && seenPartIds.add(part.getProductId())) {
+                        usedByProduct.merge(part.getProductId(), qty, Integer::sum);
+                    }
                 }
             }
         }
-        return totalUsed;
+
+        return new CartSnapshot(items, manualProductsById, autoProductsById, usedByProduct);
+    }
+
+    private record CartSnapshot(
+            List<CartItem> items,
+            Map<Integer, List<Product>> manualProductsByBuildId,
+            Map<Integer, List<Product>> autoProductsByBuildId,
+            Map<Integer, Integer> usedQuantityByProductId
+    ) {
+        List<Product> partsOf(CartItem item) {
+            if (item.getManualBuild() != null) {
+                return manualProductsByBuildId.getOrDefault(item.getManualBuild().getManualBuildId(), List.of());
+            }
+            if (item.getAutoBuild() != null) {
+                return autoProductsByBuildId.getOrDefault(item.getAutoBuild().getAutoBuildId(), List.of());
+            }
+            return List.of();
+        }
+
+        int usedByOthers(int productId, CartItem excludeItem) {
+            int total = usedQuantityByProductId.getOrDefault(productId, 0);
+            if (excludeItem == null) return total;
+            int selfUsed = 0;
+            if (excludeItem.getProduct() != null && excludeItem.getProduct().getProductId() == productId) {
+                selfUsed = excludeItem.getQuantity();
+            } else if (excludeItem.getManualBuild() != null || excludeItem.getAutoBuild() != null) {
+                if (partsOf(excludeItem).stream().anyMatch(p -> p.getProductId() == productId)) {
+                    selfUsed = excludeItem.getQuantity();
+                }
+            }
+            return Math.max(0, total - selfUsed);
+        }
+
+        int availableStock(Product product, CartItem excludeItem) {
+            return Math.max(0, product.getStockQuantity() - usedByOthers(product.getProductId(), excludeItem));
+        }
+
+        int availableBuildStock(List<Product> parts, CartItem excludeItem) {
+            return parts.stream()
+                    .filter(Objects::nonNull)
+                    .mapToInt(p -> availableStock(p, excludeItem))
+                    .min()
+                    .orElse(0);
+        }
     }
 
     private User findUser(int userId) {
