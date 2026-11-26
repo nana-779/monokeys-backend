@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,6 +22,17 @@ public interface CartItemRepository extends JpaRepository<CartItem, Integer> {
             where c.user.userId = :userId
             """)
     List<CartItem> findWithDetailsByUserId(@Param("userId") int userId);
+
+    @Query("""
+            select c from CartItem c
+            left join fetch c.product
+            left join fetch c.manualBuild
+            left join fetch c.autoBuild
+            where c.user.userId = :userId
+              and c.cartItemId in :cartItemIds
+            """)
+    List<CartItem> findWithDetailsByUserIdAndCartItemIds(@Param("userId") int userId,
+                                                         @Param("cartItemIds") Collection<Integer> cartItemIds);
     Optional<CartItem> findByUserAndProduct(User user, Product product);
 
     // 커스텀 빌드 중복 담기 체크용
