@@ -3,6 +3,7 @@ package com.green.keyboard_project.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.green.keyboard_project.dto.cart.CartAddRequest;
+import com.green.keyboard_project.dto.cart.CartBuildPartResponse;
 import com.green.keyboard_project.dto.cart.CartItemResponse;
 import com.green.keyboard_project.entity.*;
 import com.green.keyboard_project.exceptions.InvalidStateException;
@@ -74,8 +75,8 @@ public class CartService {
 
             // [B] 수동 커스텀 키보드 빌드
             if (manualBuild != null) {
-                List<Product> parts = snapshot.partsOf(item);
-                return populateBuildResponse(builder, snapshot, parts, item)
+                List<BuildPartEntry> partEntries = snapshot.partEntriesOf(item);
+                return populateBuildResponse(builder, snapshot, partEntries, item)
                         .manualBuildId(manualBuild.getManualBuildId())
                         .buildType("MANUAL")
                         .name(manualBuild.getBuildName())
@@ -86,8 +87,8 @@ public class CartService {
 
             // [C] 자동 추천 키보드 빌드
             if (autoBuild != null) {
-                List<Product> parts = snapshot.partsOf(item);
-                return populateBuildResponse(builder, snapshot, parts, item)
+                List<BuildPartEntry> partEntries = snapshot.partEntriesOf(item);
+                return populateBuildResponse(builder, snapshot, partEntries, item)
                         .autoBuildId(autoBuild.getAutoBuildId())
                         .buildType("AUTO")
                         .name(autoBuild.getBuildName())
@@ -122,8 +123,9 @@ public class CartService {
                     .filter(i -> i.getManualBuild() != null
                             && i.getManualBuild().getManualBuildId() == manualBuild.getManualBuildId())
                     .findFirst();
-            List<Product> parts = snapshot.manualProductsByBuildId().containsKey(manualBuild.getManualBuildId())
-                    ? snapshot.manualProductsByBuildId().get(manualBuild.getManualBuildId())
+            List<Product> parts = snapshot.manualPartsByBuildId().containsKey(manualBuild.getManualBuildId())
+                    ? snapshot.manualPartsByBuildId().get(manualBuild.getManualBuildId()).stream()
+                            .map(BuildPartEntry::product).toList()
                     : getManualBuildProducts(manualBuild.getManualBuildId());
             addOrUpdateBuildItem(user, snapshot, existing, parts, quantity, item -> item.setManualBuild(manualBuild));
             return;
@@ -142,8 +144,9 @@ public class CartService {
                     .filter(i -> i.getAutoBuild() != null
                             && i.getAutoBuild().getAutoBuildId() == autoBuild.getAutoBuildId())
                     .findFirst();
-            List<Product> parts = snapshot.autoProductsByBuildId().containsKey(autoBuild.getAutoBuildId())
-                    ? snapshot.autoProductsByBuildId().get(autoBuild.getAutoBuildId())
+            List<Product> parts = snapshot.autoPartsByBuildId().containsKey(autoBuild.getAutoBuildId())
+                    ? snapshot.autoPartsByBuildId().get(autoBuild.getAutoBuildId()).stream()
+                            .map(BuildPartEntry::product).toList()
                     : getAutoBuildProducts(autoBuild.getAutoBuildId());
             addOrUpdateBuildItem(user, snapshot, existing, parts, quantity, item -> item.setAutoBuild(autoBuild));
             return;
@@ -366,17 +369,31 @@ public class CartService {
     }
 
     /**
-     * 커스텀 응답 공통 필드(재고, 썸네일, 부품 ID 목록) 설정
+     * 커스텀 응답 공통 필드(재고, 썸네일, 부품 ID·상세 목록) 설정
      */
     private CartItemResponse.CartItemResponseBuilder populateBuildResponse(
             CartItemResponse.CartItemResponseBuilder builder, CartSnapshot snapshot,
-            List<Product> parts, CartItem currentItem) {
+            List<BuildPartEntry> partEntries, CartItem currentItem) {
+        List<Product> parts = partEntries.stream()
+                .map(BuildPartEntry::product)
+                .filter(Objects::nonNull)
+                .toList();
         int maxStock = snapshot.availableBuildStock(parts, currentItem);
         String thumb = extractThumbnail(parts);
         List<Integer> partIds = parts.stream().map(Product::getProductId).toList();
+        List<CartBuildPartResponse> partDetails = partEntries.stream()
+                .filter(entry -> entry.product() != null)
+                .map(entry -> CartBuildPartResponse.builder()
+                        .productId(entry.product().getProductId())
+                        .partType(entry.product().getDerivedPartType())
+                        .name(entry.product().getName())
+                        .unitPrice(entry.unitPrice())
+                        .build())
+                .toList();
         return builder.stockQuantity(maxStock)
                 .thumbnailUrl(thumb)
-                .partProductIds(partIds);
+                .partProductIds(partIds)
+                .partDetails(partDetails);
     }
 
     /**
@@ -422,22 +439,28 @@ public class CartService {
             if (item.getAutoBuild() != null) autoBuildIds.add(item.getAutoBuild().getAutoBuildId());
         }
 
-        Map<Integer, List<Product>> manualProductsById = manualBuildIds.isEmpty()
+        Map<Integer, List<BuildPartEntry>> manualPartsById = manualBuildIds.isEmpty()
                 ? Collections.emptyMap()
                 : manualBuildItemRepository.findWithProductByManualBuildIds(manualBuildIds).stream()
                         .filter(m -> m.getProduct() != null)
                         .collect(Collectors.groupingBy(
                                 m -> m.getManualBuild().getManualBuildId(),
-                                Collectors.mapping(ManualBuildItem::getProduct, Collectors.toList())
+                                Collectors.mapping(
+                                        m -> new BuildPartEntry(m.getProduct(), m.getUnitPrice()),
+                                        Collectors.toList()
+                                )
                         ));
 
-        Map<Integer, List<Product>> autoProductsById = autoBuildIds.isEmpty()
+        Map<Integer, List<BuildPartEntry>> autoPartsById = autoBuildIds.isEmpty()
                 ? Collections.emptyMap()
                 : autoBuildItemRepository.findWithProductByAutoBuildIds(autoBuildIds).stream()
                         .filter(a -> a.getProduct() != null)
                         .collect(Collectors.groupingBy(
                                 a -> a.getAutoBuild().getAutoBuildId(),
-                                Collectors.mapping(AutoBuildItem::getProduct, Collectors.toList())
+                                Collectors.mapping(
+                                        a -> new BuildPartEntry(a.getProduct(), a.getUnitPrice()),
+                                        Collectors.toList()
+                                )
                         ));
 
         Map<Integer, Integer> usedByProduct = new HashMap<>();
@@ -446,13 +469,14 @@ public class CartService {
             if (item.getProduct() != null) {
                 usedByProduct.merge(item.getProduct().getProductId(), qty, Integer::sum);
             } else {
-                List<Product> parts = item.getManualBuild() != null
-                        ? manualProductsById.getOrDefault(item.getManualBuild().getManualBuildId(), List.of())
+                List<BuildPartEntry> entries = item.getManualBuild() != null
+                        ? manualPartsById.getOrDefault(item.getManualBuild().getManualBuildId(), List.of())
                         : item.getAutoBuild() != null
-                                ? autoProductsById.getOrDefault(item.getAutoBuild().getAutoBuildId(), List.of())
+                                ? autoPartsById.getOrDefault(item.getAutoBuild().getAutoBuildId(), List.of())
                                 : List.of();
                 Set<Integer> seenPartIds = new HashSet<>();
-                for (Product part : parts) {
+                for (BuildPartEntry entry : entries) {
+                    Product part = entry.product();
                     if (part != null && seenPartIds.add(part.getProductId())) {
                         usedByProduct.merge(part.getProductId(), qty, Integer::sum);
                     }
@@ -460,23 +484,29 @@ public class CartService {
             }
         }
 
-        return new CartSnapshot(items, manualProductsById, autoProductsById, usedByProduct);
+        return new CartSnapshot(items, manualPartsById, autoPartsById, usedByProduct);
     }
+
+    private record BuildPartEntry(Product product, int unitPrice) {}
 
     private record CartSnapshot(
             List<CartItem> items,
-            Map<Integer, List<Product>> manualProductsByBuildId,
-            Map<Integer, List<Product>> autoProductsByBuildId,
+            Map<Integer, List<BuildPartEntry>> manualPartsByBuildId,
+            Map<Integer, List<BuildPartEntry>> autoPartsByBuildId,
             Map<Integer, Integer> usedQuantityByProductId
     ) {
-        List<Product> partsOf(CartItem item) {
+        List<BuildPartEntry> partEntriesOf(CartItem item) {
             if (item.getManualBuild() != null) {
-                return manualProductsByBuildId.getOrDefault(item.getManualBuild().getManualBuildId(), List.of());
+                return manualPartsByBuildId.getOrDefault(item.getManualBuild().getManualBuildId(), List.of());
             }
             if (item.getAutoBuild() != null) {
-                return autoProductsByBuildId.getOrDefault(item.getAutoBuild().getAutoBuildId(), List.of());
+                return autoPartsByBuildId.getOrDefault(item.getAutoBuild().getAutoBuildId(), List.of());
             }
             return List.of();
+        }
+
+        List<Product> partsOf(CartItem item) {
+            return partEntriesOf(item).stream().map(BuildPartEntry::product).filter(Objects::nonNull).toList();
         }
 
         int usedByOthers(int productId, CartItem excludeItem) {

@@ -444,4 +444,48 @@ class BuildControllerIntegrationTests {
                 })
                 .toArray(Cookie[]::new);
     }
+
+    @Test
+    void cartReturnsCustomBuildPartDetails() throws Exception {
+        Cookie[] cookies = signupAndLogin("cart-parts@example.com");
+
+        String buildBody = """
+                {
+                  "buildName": "상세 구성품 확인 빌드",
+                  "housingProductId": %d,
+                  "pcbProductId": %d,
+                  "switchProductId": %d,
+                  "keycapProductId": %d,
+                  "includeAssembly": true
+                }
+                """.formatted(
+                housing87.getProductId(),
+                pcb87Wireless.getProductId(),
+                switchLinear5Pin.getProductId(),
+                keycapPbt.getProductId()
+        );
+
+        String buildRes = mvc.perform(post("/api/builds/manual")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content(buildBody))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        int buildId = objectMapper.readTree(buildRes).path("data").path("buildId").asInt();
+
+        mvc.perform(post("/api/cart")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content("{\"manualBuildId\":" + buildId + ",\"quantity\":1}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/api/cart").cookie(cookies))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].partDetails.length()").value(4))
+                .andExpect(jsonPath("$.data[0].partDetails[0].partType").value("HOUSING"))
+                .andExpect(jsonPath("$.data[0].partDetails[0].name").value("알루미늄 87 하우징"))
+                .andExpect(jsonPath("$.data[0].partDetails[0].unitPrice").value(100000))
+                .andExpect(jsonPath("$.data[0].partDetails[3].partType").value("KEYCAP"));
+    }
 }

@@ -15,7 +15,9 @@ public interface ManualBuildItemRepository extends JpaRepository<ManualBuildItem
 
     @Query("""
             select m from ManualBuildItem m
-            join fetch m.product
+            join fetch m.product p
+            left join fetch p.category c
+            left join fetch c.parent
             where m.manualBuild.manualBuildId in :buildIds
             order by m.manualItemId asc
             """)

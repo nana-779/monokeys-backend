@@ -15,7 +15,9 @@ public interface AutoBuildItemRepository extends JpaRepository<AutoBuildItem, In
 
     @Query("""
             select a from AutoBuildItem a
-            join fetch a.product
+            join fetch a.product p
+            left join fetch p.category c
+            left join fetch c.parent
             where a.autoBuild.autoBuildId in :buildIds
             order by a.autoItemId asc
             """)
