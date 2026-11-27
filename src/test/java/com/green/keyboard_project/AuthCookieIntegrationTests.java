@@ -2,6 +2,7 @@ package com.green.keyboard_project;
 
 import com.green.keyboard_project.repository.UserRepository;
 import com.green.keyboard_project.repository.RefreshTokenRepository;
+import com.green.keyboard_project.service.email.ResendEmailService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,9 +11,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
+import tools.jackson.databind.json.JsonMapper;
+import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -23,14 +30,39 @@ class AuthCookieIntegrationTests {
  @Autowired WebApplicationContext context;
  @Autowired UserRepository users;
  @Autowired RefreshTokenRepository tokens;
+ @MockitoBean ResendEmailService mail;
  MockMvc mvc;
- @BeforeEach void setup(){mvc=MockMvcBuilders.webAppContextSetup(context).addFilters(context.getBean(FilterChainProxy.class)).build();}
+ @BeforeEach void setup(){
+  mvc=MockMvcBuilders.webAppContextSetup(context).addFilters(context.getBean(FilterChainProxy.class)).build();
+  given(mail.isConfigured()).willReturn(true);
+ }
  void signup(String email) throws Exception {
+  String verificationToken = issueSignupToken(email);
   mvc.perform(post("/api/users/signup").contentType("application/json").content("""
    {"email":"%s","password":"Keyboard123","name":"테스트 회원","phoneNumber":"01012345678",
+    "verificationToken":"%s",
     "defaultAddress":{"zonecode":"04524","roadAddress":"서울 세종대로","detailAddress":"101호"},
     "termsConsent":{"serviceTerms":true,"privacyPolicy":true}}
-   """.formatted(email))).andExpect(status().isCreated());
+   """.formatted(email, verificationToken))).andExpect(status().isCreated());
+ }
+ private String issueSignupToken(String email) throws Exception {
+  var code = new AtomicReference<String>();
+  given(mail.sendVerificationCode(eq(email), anyString())).willAnswer(call -> {
+   code.set(call.getArgument(1));
+   return "mock-delivery";
+  });
+  var mapper = JsonMapper.builder().build();
+  var sent = mvc.perform(post("/api/auth/email/send").contentType("application/json")
+          .content("{\"email\":\"%s\"}".formatted(email)))
+   .andExpect(status().isOk()).andReturn();
+  String challenge = mapper.readTree(sent.getResponse().getContentAsString())
+          .path("data").path("challengeId").stringValue();
+  var verified = mvc.perform(post("/api/auth/email/verify").contentType("application/json")
+          .content("{\"email\":\"%s\",\"challengeId\":\"%s\",\"code\":\"%s\"}"
+                  .formatted(email, challenge, code.get())))
+   .andExpect(status().isOk()).andReturn();
+  return mapper.readTree(verified.getResponse().getContentAsString())
+          .path("data").path("verificationToken").stringValue();
  }
  Cookie[] login(String email)throws Exception{
   var res=mvc.perform(post("/api/auth/login").contentType("application/json").content("{\"email\":\""+email+"\",\"password\":\"Keyboard123\"}"))

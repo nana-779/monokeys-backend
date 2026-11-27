@@ -22,7 +22,8 @@ public record SignupRequest(
     @NotBlank(message = "연락처를 입력해 주세요.")
     @Pattern(regexp = PHONE_PATTERN, message = PHONE_FORMAT_MESSAGE) String phoneNumber,
     @NotNull(message = "기본 배송지를 입력해 주세요.") @Valid AddressRequest defaultAddress,
-    @NotNull(message = TERMS_REQUIRED_MESSAGE) @Valid TermsConsent termsConsent
+    @NotNull(message = TERMS_REQUIRED_MESSAGE) @Valid TermsConsent termsConsent,
+    String verificationToken
 ) {
     public static final String EMAIL_PATTERN = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
     public static final String EMAIL_FORMAT_MESSAGE = "올바른 이메일 형식으로 입력해 주세요.";
@@ -47,7 +48,8 @@ public record SignupRequest(
         @JsonProperty("phone") String phone,
         @JsonProperty("postalCode") String postalCode,
         @JsonProperty("address") String address,
-        @JsonProperty("detailAddress") String detailAddress
+        @JsonProperty("detailAddress") String detailAddress,
+        @JsonProperty("verificationToken") String verificationToken
     ) {
         boolean flatAddress = postalCode != null || address != null || detailAddress != null;
         if ((phoneNumber != null && phone != null) || (defaultAddress != null && flatAddress)) {
@@ -56,9 +58,13 @@ public record SignupRequest(
         if (flatAddress) {
             defaultAddress = new AddressRequest(postalCode, address, detailAddress);
         }
+        // 두 가입 입력 형식에서 같은 이름으로 받은 토큰을 서비스에 전달합니다.
         return new SignupRequest(email, password, name, phoneNumber != null ? phoneNumber : phone,
-            defaultAddress, termsConsent);
+            defaultAddress, termsConsent, verificationToken);
     }
+
+    // 비밀번호와 가입 증명은 DTO가 문자열로 변환되는 경우에도 출력하지 않습니다.
+    @Override public String toString() { return "SignupRequest[redacted]"; }
 
     // 화면에서 보는 글자 수와 BCrypt에 전달할 UTF-8 바이트 수를 각각 확인합니다.
     // 같은 글자 수라도 한글·이모지는 바이트 수가 달라지므로 BCrypt의 72바이트 한도를 별도로 지킵니다.
