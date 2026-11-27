@@ -12,6 +12,8 @@ import com.green.keyboard_project.repository.AddressRepository;
 import com.green.keyboard_project.repository.UserRepository;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.security.WithdrawalAuth;
+import com.green.keyboard_project.service.email.EmailVerificationException;
+import com.green.keyboard_project.service.email.EmailVerificationService;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -31,21 +33,24 @@ public class UserService {
     private final ObjectProvider<WithdrawalAuth> authentication;
     private final PasswordEncoder passwords;
     private final CartItemRepository cartItemRepository;
+    private final EmailVerificationService emailVerification;
 
     @Autowired
     public UserService(UserRepository users, AddressRepository addresses,
-                       ObjectProvider<WithdrawalAuth> authentication, PasswordEncoder passwords, CartItemRepository cartItemRepository) {
+                       ObjectProvider<WithdrawalAuth> authentication, PasswordEncoder passwords,
+                       CartItemRepository cartItemRepository, EmailVerificationService emailVerification) {
         this.users = users;
         this.addresses = addresses;
         this.authentication = authentication;
         this.passwords = passwords;
         this.cartItemRepository = cartItemRepository;
+        this.emailVerification = emailVerification;
     }
 
     // 기존 테스트 코드 호환용 보조 생성자
     public UserService(UserRepository users, AddressRepository addresses,
                        ObjectProvider<WithdrawalAuth> authentication, PasswordEncoder passwords) {
-        this(users, addresses, authentication, passwords, null);
+        this(users, addresses, authentication, passwords, null, null);
     }
 
     private static LocalDateTime now() { return LocalDateTime.now(ZoneId.of("Asia/Seoul")); }
@@ -57,6 +62,11 @@ public class UserService {
 
     @Transactional
     public SignupResponse signup(SignupRequest request) {
+        // 컨트롤러를 거치지 않아도 가입 증명 확인과 트랜잭션 예약을 먼저 수행합니다.
+        if (emailVerification == null) {
+            throw new EmailVerificationException(EmailVerificationException.Code.EMAIL_VERIFICATION_UNAVAILABLE);
+        }
+        emailVerification.reserveForSignup(request.email(), request.verificationToken());
         if (users.existsByEmail(request.email())) { throw duplicateEmail(); }
         LocalDateTime time = now();
         User user = new User();

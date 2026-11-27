@@ -41,6 +41,8 @@ dependencies {
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5' // 구현할수있는 class를 로드하는것
 
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1' // swagger 사용
+	// Resend 이메일 인증 SDK
+	implementation 'com.resend:resend-java:4.30.0'
 }
 
 tasks.named('test') {

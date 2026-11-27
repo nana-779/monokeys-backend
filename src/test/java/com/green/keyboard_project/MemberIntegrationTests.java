@@ -6,6 +6,7 @@ import com.green.keyboard_project.exceptions.*;
 import com.green.keyboard_project.repository.UserRepository;
 import com.green.keyboard_project.security.WithdrawalAuth;
 import com.green.keyboard_project.service.UserService;
+import com.green.keyboard_project.service.email.ResendEmailService;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,15 +23,18 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.context.WebApplicationContext;
 import jakarta.servlet.http.Cookie;
 import tools.jackson.databind.json.JsonMapper;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
@@ -38,7 +42,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** H2 격리 환경에서 회원 API를 검증합니다. 로그인 통합 기반이 필요합니다. */
-@SpringBootTest
+@SpringBootTest(properties = {
+    "spring.config.import=", "spring.datasource.driver-class-name=org.h2.Driver",
+    "spring.datasource.url=jdbc:h2:mem:keyboard_test;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=VALUE",
+    "spring.datasource.username=sa", "spring.datasource.password=", "spring.jpa.hibernate.ddl-auto=create-drop"
+})
+@ActiveProfiles("test")
 @Transactional
 class MemberIntegrationTests {
     @Autowired UserService service;
@@ -47,6 +56,7 @@ class MemberIntegrationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired WebApplicationContext context;
     @MockitoBean WithdrawalAuth auth;
+    @MockitoBean ResendEmailService mail;
     MockMvc secured;
     String email;
     final String password = "Keyboard123";
@@ -55,6 +65,7 @@ class MemberIntegrationTests {
         email = "t-" + UUID.randomUUID().toString().substring(0, 12) + "@example.com";
         secured = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(context.getBean(FilterChainProxy.class)).build();
+        given(mail.isConfigured()).willReturn(true);
     }
     @AfterEach void clearSecurity() { SecurityContextHolder.clearContext(); }
 
@@ -74,9 +85,13 @@ class MemberIntegrationTests {
     }
 
     SignupRequest request(String candidate, String pass, AddressRequest address) {
+        return request(candidate, pass, address, null);
+    }
+
+    SignupRequest request(String candidate, String pass, AddressRequest address, String token) {
         var mapper = JsonMapper.builder().build();
         return new SignupRequest(candidate, pass, "테스트 회원", "01012345678", address,
-                new TermsConsent(mapper.readTree("true"), mapper.readTree("true")));
+                new TermsConsent(mapper.readTree("true"), mapper.readTree("true")), token);
     }
     SignupRequest valid() {
         return request(email, password, new AddressRequest("04524", "서울 세종대로", "101호"));
@@ -88,6 +103,33 @@ class MemberIntegrationTests {
              "roadAddress":"서울 세종대로","detailAddress":"101호"},
              "termsConsent":{"serviceTerms":true,"privacyPolicy":true}}
             """.formatted(email);
+    }
+
+    // 외부 발송을 가짜로 성공시키고 공개 발송·검증 API를 거쳐 실제 가입 증명을 준비합니다.
+    String issueSignupToken() throws Exception {
+        var code = new AtomicReference<String>();
+        given(mail.sendVerificationCode(eq(email), anyString())).willAnswer(call -> {
+            code.set(call.getArgument(1));
+            return "mock-delivery";
+        });
+        var mapper = JsonMapper.builder().build();
+        var sent = secured.perform(post("/api/auth/email/send").contentType("application/json")
+                        .content("{\"email\":\"%s\"}".formatted(email)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.expiresInSeconds").value(300))
+                .andExpect(jsonPath("$.data.resendAfterSeconds").value(60))
+                .andExpect(jsonPath("$.data.code").doesNotExist())
+                .andReturn();
+        String challenge = mapper.readTree(sent.getResponse().getContentAsString()).path("data").path("challengeId").stringValue();
+        var verified = secured.perform(post("/api/auth/email/verify").contentType("application/json")
+                        .content("{\"email\":\"%s\",\"challengeId\":\"%s\",\"code\":\"%s\"}".formatted(email, challenge, code.get())))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.data.expiresInSeconds").value(600))
+                .andReturn();
+        return mapper.readTree(verified.getResponse().getContentAsString()).path("data").path("verificationToken").stringValue();
+    }
+
+    String withToken(String body, String token) {
+        return "{\"verificationToken\":\"" + token + "\"," + body.substring(1);
     }
 
     // ===== 공통 =====
@@ -226,7 +268,8 @@ class MemberIntegrationTests {
     // ===== 회원가입 =====
 
     @Test void signupEndpointSavesHashedPasswordAndDefaultAddress() throws Exception {
-        secured.perform(post("/api/users/signup").contentType("application/json").characterEncoding("UTF-8").content(json()))
+        secured.perform(post("/api/users/signup").contentType("application/json")
+                        .characterEncoding("UTF-8").content(withToken(json(), issueSignupToken())))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.email").value(email)).andExpect(jsonPath("$.data.password").doesNotExist());
         String hash = jdbc.queryForObject("SELECT password FROM users WHERE email=?", String.class, email);
@@ -241,7 +284,7 @@ class MemberIntegrationTests {
         secured.perform(get("/api/auth/check-email").param("email", email))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.available").value(true));
-        secured.perform(post("/api/users/signup").contentType("application/json").content(json()))
+        secured.perform(post("/api/users/signup").contentType("application/json").content(withToken(json(), issueSignupToken())))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.role").value("USER"))
                 .andExpect(jsonPath("$.data.deleted").value(false));
         secured.perform(get("/api/auth/check-email").param("email", email))
@@ -257,8 +300,9 @@ class MemberIntegrationTests {
                 .andExpect(status().isBadRequest());
         secured.perform(post("/api/users/signup").contentType("application/json").content(json().replace("\"privacyPolicy\":true", "\"privacyPolicy\":false")))
                 .andExpect(status().isBadRequest());
-        service.signup(valid());
-        secured.perform(post("/api/users/signup").contentType("application/json").content(json()))
+        String token = issueSignupToken();
+        createMember();
+        secured.perform(post("/api/users/signup").contentType("application/json").content(withToken(json(), token)))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.success").value(false));
         secured.perform(get("/api/auth/check-email").param("email", email))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(false));
@@ -270,11 +314,11 @@ class MemberIntegrationTests {
              "postalCode":"04524","address":"서울 세종대로","detailAddress":"101호",
              "termsConsent":{"serviceTerms":true,"privacyPolicy":true}}
             """.formatted(email);
-        secured.perform(post("/api/users/signup").contentType("application/json").content(flat))
+        secured.perform(post("/api/users/signup").contentType("application/json").content(withToken(flat, issueSignupToken())))
                 .andExpect(status().isCreated());
         // 충돌하는 입력은 DTO 생성에서 거부합니다.
         assertThatThrownBy(() -> SignupRequest.fromJson(email,password,"회원","01012345678",
-                null,valid().termsConsent(),"01012345678",null,null,null)).isInstanceOf(IllegalArgumentException.class);
+                null,valid().termsConsent(),"01012345678",null,null,null,null)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test void validatesDatabaseLengthsPhoneAndPasswordByteLimit() {
@@ -285,7 +329,8 @@ class MemberIntegrationTests {
                 assertThat(validator.validate(request(email, pass, valid().defaultAddress()))).isNotEmpty();
             }
             assertThat(validator.validate(request("a".repeat(45)+"@a.com", password, valid().defaultAddress()))).isNotEmpty();
-            var bad = new SignupRequest(email,password,"회원","01112345678",valid().defaultAddress(),valid().termsConsent());
+            var bad = new SignupRequest(email,password,"회원","01112345678",
+                    valid().defaultAddress(),valid().termsConsent(),null);
             assertThat(validator.validate(bad)).isNotEmpty();
             var nonBoolean = new TermsConsent(JsonMapper.builder().build().readTree("\"true\""), valid().termsConsent().privacyPolicy());
             assertThat(validator.validate(nonBoolean)).isNotEmpty();
@@ -300,10 +345,60 @@ class MemberIntegrationTests {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
     }
 
-    @Test void addressFailureRollsBackBothUserAndAddress() {
+    @Test void addressFailureRollsBackBothUserAndAddress() throws Exception {
+        String token = issueSignupToken();
         assertThatThrownBy(() -> service.signup(request(email,password,
-                new AddressRequest("123456", "도로", "상세")))).isInstanceOf(RuntimeException.class);
+                new AddressRequest("123456", "도로", "상세"), token)))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         TestTransaction.end();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE email=?",Integer.class,email)).isZero();
+        // 확정 롤백은 가입 증명을 다시 사용할 수 있게 합니다.
+        TestTransaction.start();
+        assertThat(service.signup(request(email, password, valid().defaultAddress(), token)).email()).isEqualTo(email);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void requiresEmailProofAndDiscardsItAfterCommit() throws Exception {
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json()))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.data.code").value("VERIFICATION_REQUIRED"));
+        assertThat(users.existsByEmail(email)).isFalse();
+
+        String body = withToken(json(), issueSignupToken());
+        secured.perform(post("/api/users/signup").contentType("application/json").content(body))
+                .andExpect(status().isCreated());
+        secured.perform(post("/api/users/signup").contentType("application/json").content(body))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.data.code").value("VERIFICATION_REQUIRED"));
+    }
+
+    @Test void missingMailConfigurationFailsClosedAndKeepsEmailAvailability() throws Exception {
+        given(mail.isConfigured()).willReturn(false);
+        secured.perform(post("/api/auth/email/send").contentType("application/json")
+                        .content("{\"email\":\"%s\"}".formatted(email)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.data.code").value("EMAIL_VERIFICATION_UNAVAILABLE"));
+        secured.perform(post("/api/users/signup").contentType("application/json").content(json()))
+                .andExpect(status().isServiceUnavailable());
+        secured.perform(get("/api/auth/check-email").param("email", email))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.available").value(true));
+        verify(mail, never()).sendVerificationCode(anyString(), anyString());
+        assertThat(users.existsByEmail(email)).isFalse();
+    }
+
+    @Test void rejectsNumericCodeAndSetsRetryAfterForRepeatedSend() throws Exception {
+        // 첫 요청은 모의 발송만 사용하고, 두 번째 요청은 재발송 제한에서 차단돼야 합니다.
+        String sendBody = "{\"email\":\"%s\"}".formatted(email);
+        given(mail.sendVerificationCode(eq(email), anyString())).willReturn("mock-delivery");
+        secured.perform(post("/api/auth/email/send").contentType("application/json").content(sendBody))
+                .andExpect(status().isOk());
+        secured.perform(post("/api/auth/email/send").contentType("application/json").content(sendBody))
+                .andExpect(status().isTooManyRequests()).andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.data.code").value("EMAIL_VERIFICATION_RATE_LIMITED"));
+        verify(mail, times(1)).sendVerificationCode(eq(email), anyString());
+        secured.perform(post("/api/auth/email/verify").contentType("application/json")
+                        .content("{\"email\":\"%s\",\"challengeId\":\"%s\",\"code\":123456}"
+                                .formatted(email, "a".repeat(22))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.data.code").value("INVALID_EMAIL_VERIFICATION"));
     }
 }
