@@ -80,15 +80,19 @@ public class BuildService {
                     request.getSwitchProductId(),
                     request.getKeycapProductId()
             );
-            List<ManualBuild> userBuilds = manualBuildRepository.findByUser_UserId(owner.getUserId());
-            for (ManualBuild mb : userBuilds) {
-                if (mb.isIncludeAssembly() == includeAssembly) {
-                    Set<Integer> existIds = manualBuildItemRepository
-                            .findByManualBuild_ManualBuildIdOrderByManualItemIdAsc(mb.getManualBuildId())
-                            .stream()
-                            .map(i -> i.getProduct().getProductId())
-                            .collect(Collectors.toSet());
-                    if (existIds.equals(targetIds)) {
+            List<ManualBuild> candidates = manualBuildRepository.findByUser_UserId(owner.getUserId()).stream()
+                    .filter(mb -> mb.isIncludeAssembly() == includeAssembly)
+                    .toList();
+            if (!candidates.isEmpty()) {
+                Map<Integer, Set<Integer>> productIdsByBuild = manualBuildItemRepository
+                        .findWithProductByManualBuildIds(candidates.stream().map(ManualBuild::getManualBuildId).toList())
+                        .stream()
+                        .collect(Collectors.groupingBy(
+                                i -> i.getManualBuild().getManualBuildId(),
+                                Collectors.mapping(i -> i.getProduct().getProductId(), Collectors.toSet())
+                        ));
+                for (ManualBuild mb : candidates) {
+                    if (targetIds.equals(productIdsByBuild.get(mb.getManualBuildId()))) {
                         return toManualBuildResponse(mb, validated.toItemDtos(), false); // 기존 빌드 재사용
                     }
                 }
@@ -217,15 +221,19 @@ public class BuildService {
                     request.getSwitchProductId(),
                     request.getKeycapProductId()
             );
-            List<AutoBuild> userBuilds = autoBuildRepository.findByUser_UserId(owner.getUserId());
-            for (AutoBuild ab : userBuilds) {
-                if (ab.isIncludeAssembly() == includeAssembly) {
-                    Set<Integer> existIds = autoBuildItemRepository
-                            .findByAutoBuild_AutoBuildIdOrderByAutoItemIdAsc(ab.getAutoBuildId())
-                            .stream()
-                            .map(i -> i.getProduct().getProductId())
-                            .collect(Collectors.toSet());
-                    if (existIds.equals(targetIds)) {
+            List<AutoBuild> candidates = autoBuildRepository.findByUser_UserId(owner.getUserId()).stream()
+                    .filter(ab -> ab.isIncludeAssembly() == includeAssembly)
+                    .toList();
+            if (!candidates.isEmpty()) {
+                Map<Integer, Set<Integer>> productIdsByBuild = autoBuildItemRepository
+                        .findWithProductByAutoBuildIds(candidates.stream().map(AutoBuild::getAutoBuildId).toList())
+                        .stream()
+                        .collect(Collectors.groupingBy(
+                                i -> i.getAutoBuild().getAutoBuildId(),
+                                Collectors.mapping(i -> i.getProduct().getProductId(), Collectors.toSet())
+                        ));
+                for (AutoBuild ab : candidates) {
+                    if (targetIds.equals(productIdsByBuild.get(ab.getAutoBuildId()))) {
                         return toAutoBuildResponse(ab, validated.toItemDtos(), false);
                     }
                 }
