@@ -361,9 +361,18 @@ public class OrderService {
             List<CartItem> userCartItems = cartItemRepository.findByUser_UserId(order.getUser().getUserId());
             for (OrderItem orderItem : items) {
                 for (CartItem cartItem : userCartItems) {
-                    boolean matchProduct = orderItem.getProduct() != null
-                            && cartItem.getProduct() != null
-                            && cartItem.getProduct().getProductId() == orderItem.getProduct().getProductId();
+                    boolean matchProduct = false;
+                    if (orderItem.getProduct() != null && cartItem.getProduct() != null) {
+                        boolean sameId = cartItem.getProduct().getProductId() == orderItem.getProduct().getProductId();
+
+                        boolean hasCustomDesign = (orderItem.getCustomDesignData() != null && !orderItem.getCustomDesignData().isBlank()) || (cartItem.getCustomDesignData() != null && !cartItem.getCustomDesignData().isBlank());
+
+                        if (hasCustomDesign) {
+                            matchProduct = sameId && Objects.equals(orderItem.getCustomDesignData(), cartItem.getCustomDesignData());
+                        } else {
+                            matchProduct = sameId; // 순수 일반 상품은 productId만 비교
+                        }
+                    }
                     boolean matchManual = orderItem.getManualBuild() != null
                             && cartItem.getManualBuild() != null
                             && cartItem.getManualBuild().getManualBuildId() == orderItem.getManualBuild().getManualBuildId();
