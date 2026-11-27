@@ -24,11 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
 import org.springframework.scheduling.annotation.Scheduled;
 
 @Service
@@ -42,18 +41,6 @@ public class OrderService {
     private final PaymentRepository paymentRepository;     // 결제(Payment) 데이터 접근 계층
     private final TossOrderConfirmClient tossOrderConfirmClient; // 토스페이먼츠 서버 최종 승인 클라이언트
     private final OrderDeliveryRepository orderDeliveryRepository; // order_delivery에 접근
-
-    /**
-     * 주문 생성 (주문 및 주문 상품 일괄 저장)
-     * - @Transactional: 중간에 예외 발생 시 모든 DB 작업을 롤백하여 데이터 정합성을 보장합니다.
-     */
-    /**
-     * 주문 생성 (기본 오버로딩: userId 없을 때 request의 이메일로 조회)
-     */
-    @Transactional
-    public OrderResponse createOrder(OrderCreateRequest request) {
-        return createOrder(null, request);
-    }
 
     /**
      * 주문 생성 (주문 및 주문 상품 일괄 저장)
@@ -183,10 +170,23 @@ public class OrderService {
     @Transactional(readOnly = true)
     public List<OrderResponse> getAllOrders() {
         List<Order> orders = orderRepository.findAllByOrderByCreatedAtDesc();
-        List<OrderResponse> responses = new ArrayList<>();
+        if (orders.isEmpty()) {
+            return  Collections.emptyList();
+        }
 
+        // 주문 ID 목록 추출
+        List<Integer> orderIds = orders.stream().map(Order::getOrderId).toList();
+
+        Map<Integer, List<OrderItem>> itemsByOrderId =
+            orderItemRepository.findMyOrderItems(orderIds).stream()
+                    .collect(Collectors.groupingBy(item ->
+                            item.getOrder().getOrderId()));
+
+        // 메모리에서 DTO 조립
+        List<OrderResponse> responses = new ArrayList<>();
         for (Order order : orders) {
-            List<OrderItem> items = orderItemRepository.findByOrder(order);
+            List<OrderItem> items = itemsByOrderId.getOrDefault(order.getOrderId(),
+                    Collections.emptyList());
             responses.add(toOrderResponse(order, items));
         }
 
