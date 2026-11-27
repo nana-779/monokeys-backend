@@ -36,6 +36,9 @@ public class OrderItem {
     @JoinColumn(name = "auto_build_id", nullable = true)
     private AutoBuild autoBuild;
 
+    @Column(name = "custom_design_data", columnDefinition = "TEXT")
+    private String customDesignData;
+
     @Column(name = "product_name_snapshot", nullable = false, length = 200)
     private String productNameSnapshot;
 
