@@ -55,29 +55,23 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse createOrder(Integer userId, OrderCreateRequest request) {
-        // [1] 주문 상품 목록 필수값 검증
-        if (request.getItems() == null || request.getItems().isEmpty()) {
-            throw new InvalidStateException("주문 상품 목록이 비어 있습니다.");
+        // 주문은 반드시 로그인된 사용자만 가능하도록 수정
+        if (userId == null) {
+            throw new UnauthenticatedException("주문을 진행하려면 로그인이 필요합니다.");
         }
 
-        // [2] 주문자 회원 조회 및 유효성 검증 (인증된 userId 우선, 없으면 request의 이메일 조회)
-        User user;
-        if (userId != null) {
-            user = userRepository.findById(userId)
-                    .orElseThrow(() -> new ResourceNotFoundException("등록된 회원 정보를 찾을 수 없습니다. (ID: " + userId + ")"));
-        } else {
-            if (request.getOrdererEmail() == null || request.getOrdererEmail().isBlank()) {
-                throw new InvalidStateException("주문자 이메일은 필수입니다.");
-            }
-            user = userRepository.findByEmail(request.getOrdererEmail())
-                    .orElseThrow(() -> new ResourceNotFoundException("등록된 회원 정보를 찾을 수 없습니다. (이메일: " + request.getOrdererEmail() + ")"));
-        }
+        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("등록된 회원 정보를 찾을 수 없습니다. (ID: " + userId + ")"));
 
         if (user.isDeleted()) {
             throw new InvalidStateException("탈퇴한 회원은 주문할 수 없습니다.");
         }
 
-        // [3] 주문자 이름 및 연락처(DB 11자리 제한) 정제
+        // 주문 상품 목록 필수값 검증
+        if (request.getItems() == null || request.getItems().isEmpty()) {
+            throw new InvalidStateException("주문 상품 목록이 비어 있습니다.");
+        }
+
+        // 주문자 이름 및 연락처(DB 11자리 제한) 정제
         String ordererName = request.getOrdererName() != null && !request.getOrdererName().isBlank()
                 ? request.getOrdererName()
                 : user.getName();
@@ -272,9 +266,18 @@ public class OrderService {
      * 토스페이먼츠 결제 승인 완료 처리 (실제 토스 서버 최종 승인 후 DB 반영)
      */
     @Transactional
-    public OrderResponse completePayment(String orderNumber, String paymentKey, int amount) {
+    public OrderResponse completePayment(Integer userId, String orderNumber, String paymentKey, int amount) {
         Order order = orderRepository.findByOrderNumber(orderNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("주문 정보를 찾을 수 없습니다."));
+
+        if (order.getUser() != null) {
+            if (userId == null) {
+                throw new UnauthenticatedException("결제 승인을 진행하려면 로그인이 필요합니다.");
+            }
+            if (order.getUser().getUserId() != userId) {
+                throw new InvalidStateException("본인의 주문만 결제를 진행할 수 있습니다.");
+            }
+        }
 
         if (order.getOrderStatus() == Order.OrderStatusType.ORDERED) {
             List<OrderItem> items = orderItemRepository.findByOrder(order);
