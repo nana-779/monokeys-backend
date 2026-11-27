@@ -229,41 +229,47 @@ public class ProductService {
             predicates.add(cb.isTrue(root.get("isActive")));
             predicates.add(cb.greaterThan(root.get("stockQuantity"), 0));
 
-            Join<Product, Category> categoryJoin = root.join("category", JoinType.LEFT);
-            Join<Category, Category> parentJoin = categoryJoin.join("parent", JoinType.LEFT);
-
-            if (category != null && !"all".equalsIgnoreCase(category)) {
-                predicates.add(cb.or(
-                        cb.equal(categoryJoin.get("categoryId"), category),
-                        cb.equal(parentJoin.get("categoryId"), category)
-                ));
-            }
-            if (subcategory != null) {
-                predicates.add(cb.equal(categoryJoin.get("categoryId"), subcategory));
-            }
-
+            boolean hasCategory = category != null && !"all".equalsIgnoreCase(category);
+            boolean hasSubcategory = subcategory != null && !subcategory.isBlank();
             List<String> tokens = extractSearchTokens(keyword);
-            for (String token : tokens) {
-                String pattern = "%" + token.toLowerCase() + "%";
-                Subquery<Integer> specSubquery = query.subquery(Integer.class);
-                Root<ProductSpec> specRoot = specSubquery.from(ProductSpec.class);
-                specSubquery.select(cb.literal(1)).where(
-                        cb.equal(specRoot.get("productId"), root.get("productId")),
-                        cb.or(
-                                cb.like(cb.lower(cb.coalesce(specRoot.get("layout"), "")), pattern, '!'),
-                                cb.like(cb.lower(cb.coalesce(specRoot.get("housingMaterial"), "")), pattern, '!'),
-                                cb.like(cb.lower(cb.coalesce(specRoot.get("keycapMaterial"), "")), pattern, '!'),
-                                cb.like(cb.lower(cb.coalesce(specRoot.get("switchType"), "")), pattern, '!')
-                        )
-                );
+            boolean hasKeyword = !tokens.isEmpty();
 
-                predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("name")), pattern, '!'),
-                        cb.like(cb.lower(cb.coalesce(root.get("description"), "")), pattern, '!'),
-                        cb.like(cb.lower(cb.coalesce(categoryJoin.get("name"), "")), pattern, '!'),
-                        cb.like(cb.lower(cb.coalesce(parentJoin.get("name"), "")), pattern, '!'),
-                        cb.exists(specSubquery)
-                ));
+            if (hasCategory || hasSubcategory || hasKeyword) {
+                Join<Product, Category> categoryJoin = root.join("category", JoinType.LEFT);
+                Join<Category, Category> parentJoin = categoryJoin.join("parent", JoinType.LEFT);
+
+                if (hasCategory) {
+                    predicates.add(cb.or(
+                            cb.equal(categoryJoin.get("categoryId"), category),
+                            cb.equal(parentJoin.get("categoryId"), category)
+                    ));
+                }
+                if (hasSubcategory) {
+                    predicates.add(cb.equal(categoryJoin.get("categoryId"), subcategory));
+                }
+
+                for (String token : tokens) {
+                    String pattern = "%" + token.toLowerCase() + "%";
+                    Subquery<Integer> specSubquery = query.subquery(Integer.class);
+                    Root<ProductSpec> specRoot = specSubquery.from(ProductSpec.class);
+                    specSubquery.select(cb.literal(1)).where(
+                            cb.equal(specRoot.get("productId"), root.get("productId")),
+                            cb.or(
+                                    cb.like(cb.lower(cb.coalesce(specRoot.get("layout"), "")), pattern, '!'),
+                                    cb.like(cb.lower(cb.coalesce(specRoot.get("housingMaterial"), "")), pattern, '!'),
+                                    cb.like(cb.lower(cb.coalesce(specRoot.get("keycapMaterial"), "")), pattern, '!'),
+                                    cb.like(cb.lower(cb.coalesce(specRoot.get("switchType"), "")), pattern, '!')
+                            )
+                    );
+
+                    predicates.add(cb.or(
+                            cb.like(cb.lower(root.get("name")), pattern, '!'),
+                            cb.like(cb.lower(cb.coalesce(root.get("description"), "")), pattern, '!'),
+                            cb.like(cb.lower(cb.coalesce(categoryJoin.get("name"), "")), pattern, '!'),
+                            cb.like(cb.lower(cb.coalesce(parentJoin.get("name"), "")), pattern, '!'),
+                            cb.exists(specSubquery)
+                    ));
+                }
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));
