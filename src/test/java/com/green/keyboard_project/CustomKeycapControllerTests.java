@@ -7,6 +7,7 @@ import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.repository.CategoryRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.service.CustomKeycapImageCleanupService;
+import com.green.keyboard_project.service.email.ResendEmailService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,8 +29,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -55,6 +61,7 @@ class CustomKeycapControllerTests {
     @Autowired CategoryRepository categoryRepository;
     @Autowired ProductRepository productRepository;
     @Autowired CustomKeycapImageCleanupService imageCleanupService;
+    @MockitoBean ResendEmailService mail;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private MockMvc mvc;
@@ -62,6 +69,7 @@ class CustomKeycapControllerTests {
 
     @BeforeEach
     void setup() throws Exception {
+        given(mail.isConfigured()).willReturn(true);
         Path keycapUploadDir = tempUploadRoot.resolve("custom-keycaps");
         Files.createDirectories(keycapUploadDir);
         try (var stream = Files.list(keycapUploadDir)) {
@@ -280,6 +288,7 @@ class CustomKeycapControllerTests {
     }
 
     private Cookie[] signupAndLogin(String email) throws Exception {
+        String verificationToken = issueSignupToken(email);
         mvc.perform(post("/api/users/signup")
                         .contentType("application/json")
                         .content("""
@@ -289,9 +298,10 @@ class CustomKeycapControllerTests {
                                   "name": "테스트회원",
                                   "phoneNumber": "01012345678",
                                   "defaultAddress": {"zonecode": "04524", "roadAddress": "서울 세종대로", "detailAddress": "101호"},
+                                  "verificationToken": "%s",
                                   "termsConsent": {"serviceTerms": true, "privacyPolicy": true}
                                 }
-                                """.formatted(email)))
+                                """.formatted(email, verificationToken)))
                 .andExpect(status().isCreated());
 
         var res = mvc.perform(post("/api/auth/login")
@@ -306,5 +316,25 @@ class CustomKeycapControllerTests {
                     return new Cookie(pair[0], pair[1]);
                 })
                 .toArray(Cookie[]::new);
+    }
+
+    private String issueSignupToken(String email) throws Exception {
+        var code = new AtomicReference<String>();
+        given(mail.sendVerificationCode(eq(email), anyString())).willAnswer(call -> {
+            code.set(call.getArgument(1));
+            return "mock-delivery";
+        });
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var sent = mvc.perform(post("/api/auth/email/send").contentType("application/json")
+                        .content("{\"email\":\"%s\"}".formatted(email)))
+                .andExpect(status().isOk()).andReturn();
+        String challenge = mapper.readTree(sent.getResponse().getContentAsString())
+                .path("data").path("challengeId").stringValue();
+        var verified = mvc.perform(post("/api/auth/email/verify").contentType("application/json")
+                        .content("{\"email\":\"%s\",\"challengeId\":\"%s\",\"code\":\"%s\"}"
+                                .formatted(email, challenge, code.get())))
+                .andExpect(status().isOk()).andReturn();
+        return mapper.readTree(verified.getResponse().getContentAsString())
+                .path("data").path("verificationToken").stringValue();
     }
 }
