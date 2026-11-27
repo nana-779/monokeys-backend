@@ -230,8 +230,16 @@ public class OrderService {
         var itemsByOrder = new HashMap<Integer, List<MyOrderSummary.Item>>();
         for (var item : orderItemRepository.findMyOrderItems(orderIds)) {
             var product = item.getProduct();
-            var summary = new MyOrderSummary.Item(item.getOrderItemId(), item.getProductNameSnapshot(),
-                    item.getOrderedPrice(), item.getQuantity(), product == null ? null : product.getThumbnailUrl());
+
+            String thumbnailUrl = extractThumbnailUrl(item, product);
+
+            var summary = new MyOrderSummary.Item(
+                    item.getOrderItemId(),
+                    item.getProductNameSnapshot(),
+                    item.getOrderedPrice(),
+                    item.getQuantity(),
+                    thumbnailUrl
+            );
             itemsByOrder.computeIfAbsent(item.getOrder().getOrderId(), id -> new ArrayList<>()).add(summary);
         }
         return headers.stream().map(header -> header.withItems(itemsByOrder.getOrDefault(header.orderId(), List.of())))
@@ -445,5 +453,26 @@ public class OrderService {
                 .createdAt(order.getCreatedAt())
                 .items(itemResponses)
                 .build();
+    }
+
+    /**
+     * 주문 품목에서 썸네일 이미지 URL 추출 (커스텀 키캡의 디자인 미리보기 이미지 우선)
+     */
+    private String extractThumbnailUrl(OrderItem item, Product product) {
+        if (item.getCustomDesignData() != null && !item.getCustomDesignData().isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readTree(item.getCustomDesignData());
+                String previewUrl = node.path("previewImageUrl").asText(null);
+                if (previewUrl == null || previewUrl.isBlank()) {
+                    previewUrl = node.path("printImageUrl").asText(null);
+                }
+                if (previewUrl != null && !previewUrl.isBlank()) {
+                    return previewUrl;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return product != null ? product.getThumbnailUrl() : null;
     }
 }
