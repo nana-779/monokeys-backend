@@ -326,6 +326,7 @@ public class OrderCancellationStore {
         if (cancellation.amount() == remaining) {
             payment.setPaymentStatus(PaymentStatusType.CANCELLED);
             payment.setCancelledAt(canceledAt);
+<<<<<<< HEAD
             Order order = payment.getOrder();
             order.setOrderStatus(OrderStatusType.CANCELLED);
             if (refund.getRequestType() == RequestType.CANCELLATION) {
@@ -340,6 +341,9 @@ public class OrderCancellationStore {
                 deliveries.findByOrder_OrderId(order.getOrderId()).orElseThrow(OrderCancellationStore::missing)
                         .setDeliveryStatus(RETURNED);
             }
+=======
+            payment.getOrder().setOrderStatus(OrderStatusType.REFUNDED);
+>>>>>>> a8c5b69e3f134960775e8600c81c4dd447b674d2
         }
     }
 
