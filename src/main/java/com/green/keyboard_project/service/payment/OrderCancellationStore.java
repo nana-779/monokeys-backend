@@ -120,7 +120,7 @@ public class OrderCancellationStore {
         if (cancellation.amount() == remaining) {
             payment.setPaymentStatus(PaymentStatusType.CANCELLED);
             payment.setCancelledAt(canceledAt);
-            payment.getOrder().setOrderStatus(OrderStatusType.CANCELLED);
+            payment.getOrder().setOrderStatus(OrderStatusType.REFUNDED);
         }
     }
 

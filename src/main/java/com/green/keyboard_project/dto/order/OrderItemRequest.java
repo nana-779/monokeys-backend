@@ -18,9 +18,18 @@ import lombok.Setter;
 @AllArgsConstructor
 @Builder
 public class OrderItemRequest {
-    // 주문할 상품 식별자 (PK)
-    @NotNull(message = "상품 ID는 필수입니다.")
+    // 장바구니 항목 ID (장바구니 기반 주문 시 필수)
+    private Integer cartItemId;
+
+    // 단품 상품 식별자 (선택)
     private Integer productId;
+
+    // 커스텀 빌드 식별자 (선택)
+    private Integer manualBuildId;
+    private Integer autoBuildId;
+
+    // 커스텀 디자인 데이터 (선택)
+    private String customDesignData;
 
     // 주문 수량 (최소 1개 이상)
     @NotNull(message = "수량은 필수입니다.")
