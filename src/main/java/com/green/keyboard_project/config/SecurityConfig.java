@@ -60,6 +60,8 @@ public class SecurityConfig {
                         // 신규 취소 요청만 보호합니다. 기존 승인과 실패 통지 경로의 규칙에는 영향을 주지 않습니다.
                         .requestMatchers(HttpMethod.POST, "/api/payments/orders/{orderNumber}/refund/cancel",
                                 "/api/payments/orders/{orderNumber}/refund/reconcile").authenticated()
+                        .requestMatchers("/api/payments/orders/{orderNumber}/refund/request",
+                                "/api/payments/orders/{orderNumber}/refund/request/**").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/products/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()

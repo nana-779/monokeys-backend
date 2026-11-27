@@ -11,5 +11,7 @@ public interface RefundRepository extends JpaRepository<Refund, Integer> {
 
     List<Refund> findByPayment_PaymentIdOrderByRequestedAtDesc(int paymentId);
 
+    List<Refund> findByRequestTypeIsNotNullOrderByRequestedAtDescRefundIdDesc();
+
     boolean existsByPgCancelTid(String transactionKey);
 }

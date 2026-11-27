@@ -42,6 +42,19 @@ public class OrderCancellationService {
             throw new PaymentConfirmationException(409, "REFUND_BALANCE_CHANGED",
                     "이전 취소 내역이 있는 결제는 전액 취소할 수 없습니다.");
         }
+        return execute(target, amount, request, () -> store.reserve(target, memberId, request));
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public Result executeWorkflow(int id, boolean returned) {
+        var pending = store.inspectWorkflow(id, returned);
+        var request = new OrderCancellationRequest(OrderCancellationRequest.Mode.FULL,
+                pending.reason(), null, pending.target().remaining(), null);
+        return execute(pending.target(), pending.amount(), request, () -> store.reserveWorkflow(pending, returned));
+    }
+
+    private Result execute(Target target, int amount, OrderCancellationRequest request,
+                           java.util.function.IntSupplier reserve) {
         TossCancellationGateway gateway = configuredGateway();
 
         Snapshot before;
@@ -56,7 +69,7 @@ public class OrderCancellationService {
         }
         Integer providerAmount = OrderCancellationPolicy.providerAmount(request, before);
         // 결제 행 잠금 아래 진행 중인 요청을 먼저 저장해 동시 요청이 결제사로 중복 전송되지 않게 합니다.
-        int refundId = store.reserve(target, memberId, request);
+        int refundId = reserve.getAsInt();
         // DB 요청 번호로 고정한 멱등키와 식별 문구를 사용해 재조회에서 같은 금액의 다른 취소와 구분합니다.
         String idempotencyKey = "monokeys-refund-" + UUID.nameUUIDFromBytes(
                 (target.paymentKey() + ":" + refundId).getBytes(StandardCharsets.UTF_8));
@@ -97,7 +110,15 @@ public class OrderCancellationService {
     // 네트워크 장애나 서버 재시작 뒤에도 저장된 요청을 재조회하며 취소 POST를 다시 전송하지 않습니다.
     @Transactional(propagation = Propagation.NEVER)
     public Result reconcile(String orderNumber, Integer memberId) {
-        var pending = store.pendingForRecovery(orderNumber, memberId);
+        return reconcilePending(store.pendingForRecovery(orderNumber, memberId));
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public Result reconcileWorkflow(int id) {
+        return reconcilePending(store.pendingWorkflow(id));
+    }
+
+    private Result reconcilePending(OrderCancellationStore.Pending pending) {
         TossCancellationGateway gateway = configuredGateway();
         Cancellation confirmed;
         try {

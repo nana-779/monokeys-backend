@@ -4,6 +4,11 @@ import com.green.keyboard_project.dto.ApiResponse;
 import com.green.keyboard_project.dto.payment.OrderCancellationRequest;
 import com.green.keyboard_project.exceptions.PaymentConfirmationException;
 import com.green.keyboard_project.service.payment.OrderCancellationService;
+import com.green.keyboard_project.service.payment.OrderCancellationStore;
+import com.green.keyboard_project.service.payment.OrderCancellationStore.WorkflowRequest;
+import com.green.keyboard_project.service.payment.OrderCancellationStore.WorkflowView;
+import com.green.keyboard_project.entity.Refund.RequestType;
+import java.util.List;
 import com.green.keyboard_project.service.payment.OrderCancellationService.Result;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
@@ -19,19 +24,23 @@ import tools.jackson.databind.JsonNode;
 public class OrderCancellationController {
     private final OrderCancellationService cancellations;
     private final String allowedOrigin;
+    private final OrderCancellationStore workflow;
 
-    public OrderCancellationController(OrderCancellationService cancellations,
+    public OrderCancellationController(OrderCancellationService cancellations, OrderCancellationStore workflow,
             @Value("${cors.allowed-origin:http://localhost:3000}") String allowedOrigin) {
         this.cancellations = cancellations;
+        this.workflow = workflow;
         this.allowedOrigin = allowedOrigin;
     }
 
     @PostMapping(path = "/api/payments/orders/{orderNumber}/refund/cancel", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ApiResponse<Result>> cancel(@PathVariable("orderNumber") String orderNumber,
+    public ResponseEntity<ApiResponse<WorkflowView>> cancel(@PathVariable("orderNumber") String orderNumber,
             @AuthenticationPrincipal Integer memberId, @RequestHeader(name = "Origin", required = false) String origin,
             @RequestBody JsonNode body) {
         verifyWriteRequest(memberId, origin);
-        return response(cancellations.cancel(orderNumber, memberId, OrderCancellationRequest.fromJson(body)));
+        var request = OrderCancellationRequest.fromJson(body);
+        return ResponseEntity.accepted().body(ApiResponse.ok(workflow.requestWorkflow(orderNumber, memberId,
+                new WorkflowRequest(RequestType.CANCELLATION, request.cancelReason(), null))));
     }
 
     @PostMapping("/api/payments/orders/{orderNumber}/refund/reconcile")
@@ -39,6 +48,56 @@ public class OrderCancellationController {
             @AuthenticationPrincipal Integer memberId, @RequestHeader(name = "Origin", required = false) String origin) {
         verifyWriteRequest(memberId, origin);
         return response(cancellations.reconcile(orderNumber, memberId));
+    }
+
+    @GetMapping("/api/payments/orders/{orderNumber}/refund/request")
+    public ResponseEntity<ApiResponse<WorkflowView>> workflow(@PathVariable("orderNumber") String orderNumber,
+            @AuthenticationPrincipal Integer memberId) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.ok(workflow.workflow(orderNumber, memberId)));
+    }
+
+    @PostMapping("/api/payments/orders/{orderNumber}/refund/request")
+    public ResponseEntity<ApiResponse<WorkflowView>> request(@PathVariable("orderNumber") String orderNumber,
+            @AuthenticationPrincipal Integer memberId, @RequestHeader(name = "Origin", required = false) String origin,
+            @RequestBody WorkflowRequest request) {
+        verifyWriteRequest(memberId, origin);
+        return ResponseEntity.accepted().body(ApiResponse.ok(workflow.requestWorkflow(orderNumber, memberId, request)));
+    }
+
+    @PostMapping("/api/payments/orders/{orderNumber}/refund/request/{id}/withdraw")
+    public ResponseEntity<Void> withdraw(@PathVariable("orderNumber") String orderNumber, @PathVariable("id") int id,
+            @AuthenticationPrincipal Integer memberId, @RequestHeader(name = "Origin", required = false) String origin) {
+        verifyWriteRequest(memberId, origin);
+        workflow.withdrawWorkflow(orderNumber, memberId, id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/admin/refund-requests")
+    public ResponseEntity<ApiResponse<List<WorkflowView>>> queue() {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.ok(workflow.workflowQueue()));
+    }
+
+    public record Review(String action, String reason) {}
+
+    @PostMapping("/api/admin/refund-requests/{id}")
+    public ResponseEntity<?> review(@PathVariable("id") int id, @AuthenticationPrincipal Integer adminId,
+            @RequestHeader(name = "Origin", required = false) String origin, @RequestBody Review review) {
+        verifyWriteRequest(adminId, origin);
+        if (review.action() == null) throw new PaymentConfirmationException(400, "INVALID_ACTION", "처리 유형을 선택해 주세요.");
+        return switch (review.action()) {
+            case "APPROVE_CANCELLATION" -> response(cancellations.executeWorkflow(id, false));
+            case "HOLD_RETURN" -> {
+                workflow.holdReturn(id);
+                yield ResponseEntity.noContent().build();
+            }
+            case "RECEIVE_RETURN" -> response(cancellations.executeWorkflow(id, true));
+            case "RECONCILE" -> response(cancellations.reconcileWorkflow(id));
+            case "REJECT" -> {
+                workflow.rejectWorkflow(id, review.reason());
+                yield ResponseEntity.noContent().build();
+            }
+            default -> throw new PaymentConfirmationException(400, "INVALID_ACTION", "처리 유형을 확인해 주세요.");
+        };
     }
 
     private void verifyWriteRequest(Integer memberId, String origin) {

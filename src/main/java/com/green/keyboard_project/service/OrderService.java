@@ -197,7 +197,7 @@ public class OrderService {
     public void confirmMyDelivery(Integer userId, String orderNumber) {
         if (userId == null) throw new UnauthenticatedException("로그인이 필요합니다.");
         if (orderDeliveryRepository.confirmMyDelivery(orderNumber, userId) == 0) {
-            throw new InvalidStateException("본인의 배송 중인 주문만 수령 확인할 수 있습니다.");
+            throw new InvalidStateException("본인의 배송 중이거나 배송 완료된 주문만 한 번 수령 확인할 수 있습니다.");
         }
     }
 
@@ -221,7 +221,9 @@ public class OrderService {
         var order = orderRepository.findByOrderNumberAndUser_UserIdAndUser_IsDeletedFalse(orderNumber, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다."));
         return new MyOrderDetail(summary, order.getOrdererName(), order.getOrdererPhone(),
-                order.getPostalCode(), order.getRoadAddress(), order.getDetailAddress());
+                order.getPostalCode(), order.getRoadAddress(), order.getDetailAddress(),
+                orderDeliveryRepository.findByOrder_OrderId(order.getOrderId())
+                        .map(delivery -> delivery.getReceiptConfirmedAt() != null).orElse(false));
     }
 
     private List<MyOrderSummary> readMyOrders(Integer userId, String orderNumber) {
@@ -281,7 +283,7 @@ public class OrderService {
             return toOrderResponse(order, items);
         }
 
-        if (order.getOrderStatus() == Order.OrderStatusType.CANCELLED) {
+        if (order.getOrderStatus() == Order.OrderStatusType.CANCELLED || order.getOrderStatus() == Order.OrderStatusType.REFUNDED) {
             throw new InvalidStateException("이미 취소된 주문입니다.");
         }
 

@@ -67,6 +67,9 @@ public class AdminOrderService {
     // 관리자 배송 내역 수정 (주문 내역 업데이트)
     @Transactional
     public void updateAdminOrder(int orderId, AdminOrderEdit edit) {
+        if (edit.company() != null || edit.tracking() != null) {
+            lockPaymentForShipment(orderId);
+        }
         if (edit.postalCode() != null || edit.roadAddress() != null || edit.detailAddress() != null) {
             var editable = jdbc.queryForList("""
                     SELECT d.delivery_id FROM order_delivery d JOIN orders o ON o.order_id = d.order_id
@@ -99,11 +102,15 @@ public class AdminOrderService {
         saveShipment(orderId, company, tracking, false);
     }
 
+    private void lockPaymentForShipment(int orderId) {
+        jdbc.queryForList("SELECT payment_id FROM payment WHERE order_id = ? FOR UPDATE", Integer.class, orderId);
+    }
+
     // 배송사, 송장 수정
     // 첫 등록이면 발송 처리, 수정이면 기존 배송 상태를 유지
     private void saveShipment(int orderId, String company, String tracking, boolean allowCorrection) {
         // 취소 예약과 발송이 동시에 진행되지 않도록 같은 결제 행을 잠급니다.
-        jdbc.queryForList("SELECT payment_id FROM payment WHERE order_id = ? FOR UPDATE", Integer.class, orderId);
+        lockPaymentForShipment(orderId);
         int updated = jdbc.update("""
                 UPDATE order_delivery d JOIN orders o ON o.order_id = d.order_id
                 JOIN payment p ON p.order_id = o.order_id
@@ -112,7 +119,7 @@ public class AdminOrderService {
                 WHERE d.order_id = ? AND ((d.delivery_status = 'PREPARING' AND o.order_status = 'ORDERED')
                     OR (? AND d.delivery_status IN ('SHIPPING','DELIVERED') AND o.order_status IN ('ORDERED','CONFIRMED')))
                   AND p.payment_status = 'PAID'
-                  AND NOT EXISTS (SELECT 1 FROM refund r WHERE r.payment_id = p.payment_id AND r.status = 'REQUESTED')
+                  AND NOT EXISTS (SELECT 1 FROM refund r WHERE r.payment_id = p.payment_id AND r.status IN ('PENDING_APPROVAL','REQUESTED','AWAITING_RETURN'))
                 """, company.strip(), tracking.strip(), orderId, allowCorrection);
         if (updated == 0) throw new InvalidStateException("현재 주문 상태에서는 송장을 저장할 수 없습니다.");
     }

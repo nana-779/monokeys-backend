@@ -72,7 +72,7 @@ public class Order {
     private String deliveryMemo;
 
     public enum OrderStatusType {
-        PENDING, ORDERED, CANCELLED, CONFIRMED
+        PENDING, ORDERED, CANCELLED, CONFIRMED, REFUNDED
     }
 
 }

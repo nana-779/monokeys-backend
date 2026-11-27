@@ -45,7 +45,7 @@ public class OrderDelivery {
     private LocalDateTime receiptConfirmedAt;
 
     public enum DeliveryStatusType {
-        PREPARING, SHIPPING, DELIVERED, RETURNED
+        PREPARING, SHIPPING, DELIVERED, CANCELLED, RETURNED
     }
 
 }
