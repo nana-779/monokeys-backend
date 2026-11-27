@@ -435,6 +435,9 @@ public class OrderService {
                 itemResponses.add(OrderItemResponse.builder()
                         .orderItemId(item.getOrderItemId())
                         .productId(item.getProduct() != null ? item.getProduct().getProductId() : null)
+                        .manualBuildId(item.getManualBuild() != null ? item.getManualBuild().getManualBuildId() : null)
+                        .autoBuildId(item.getAutoBuild() != null ? item.getAutoBuild().getAutoBuildId() : null)
+                        .customDesignData(item.getCustomDesignData())
                         .productName(item.getProductNameSnapshot())
                         .unitPrice(item.getOrderedPrice())
                         .quantity(item.getQuantity())
@@ -466,7 +469,7 @@ public class OrderService {
         if (item.getCustomDesignData() != null && !item.getCustomDesignData().isBlank()) {
             try {
                 JsonNode node = objectMapper.readTree(item.getCustomDesignData());
-                
+
                 String previewUrl = node.path("previewImageUrl").asText(null);
                 if (previewUrl == null || previewUrl.isBlank()) {
                     previewUrl = node.path("printImageUrl").asText(null);
