@@ -129,4 +129,23 @@ public class TossOrderConfirmClient {
         }
         return "결제 승인이 거절되었습니다.";
     }
+
+    /**
+     * 결제 승인 후 재고 부족 등 서버 후속 처리 실패 시 즉시 자동 결제 취소(망취소)
+     */
+    public void cancelPayment(String paymentKey, String cancelReason) {
+        try {
+            String basicAuth = Base64.getEncoder().encodeToString((secretKey + ":").getBytes(StandardCharsets.UTF_8));
+            restClient.post()
+                    .uri("https://api.tosspayments.com/v1/payments/{paymentKey}/cancel", paymentKey)
+                    .header("Authorization", "Basic " + basicAuth)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("cancelReason", cancelReason))
+                    .retrieve()
+                    .toBodilessEntity();
+            log.info("토스페이먼츠 긴급 취소 완료: paymentKey={}, reason={}", paymentKey, cancelReason);
+        } catch (Exception e) {
+            log.error("토스페이먼츠 긴급 취소 실패: paymentKey={}", paymentKey, e);
+        }
+    }
 }
