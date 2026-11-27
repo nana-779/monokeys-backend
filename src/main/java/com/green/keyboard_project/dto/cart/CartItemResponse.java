@@ -31,4 +31,5 @@ public class CartItemResponse {
     private String customDesignData;
     private Boolean includeAssembly;
     private List<Integer> partProductIds;
+    private List<CartBuildPartResponse> partDetails;
 }
