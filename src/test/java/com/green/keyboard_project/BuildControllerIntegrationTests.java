@@ -2,12 +2,15 @@ package com.green.keyboard_project;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.green.keyboard_project.dto.cart.CartOrderLine;
 import com.green.keyboard_project.entity.CartItem;
 import com.green.keyboard_project.entity.Category;
 import com.green.keyboard_project.entity.ManualBuild;
+import com.green.keyboard_project.entity.OrderItem;
 import com.green.keyboard_project.entity.Product;
 import com.green.keyboard_project.entity.ProductSpec;
 import com.green.keyboard_project.entity.User;
+import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.repository.AutoBuildRepository;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.CategoryRepository;
@@ -15,6 +18,7 @@ import com.green.keyboard_project.repository.ManualBuildRepository;
 import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.ProductSpecRepository;
 import com.green.keyboard_project.repository.UserRepository;
+import com.green.keyboard_project.service.CartService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,8 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -46,6 +52,7 @@ class BuildControllerIntegrationTests {
     @Autowired ManualBuildRepository manualBuildRepository;
     @Autowired AutoBuildRepository autoBuildRepository;
     @Autowired CartItemRepository cartItemRepository;
+    @Autowired CartService cartService;
     @Autowired UserRepository userRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -443,5 +450,151 @@ class BuildControllerIntegrationTests {
                     return new Cookie(pair[0], pair[1]);
                 })
                 .toArray(Cookie[]::new);
+    }
+
+    @Test
+    void cartReturnsCustomBuildPartDetails() throws Exception {
+        Cookie[] cookies = signupAndLogin("cart-parts@example.com");
+
+        String buildBody = """
+                {
+                  "buildName": "상세 구성품 확인 빌드",
+                  "housingProductId": %d,
+                  "pcbProductId": %d,
+                  "switchProductId": %d,
+                  "keycapProductId": %d,
+                  "includeAssembly": true
+                }
+                """.formatted(
+                housing87.getProductId(),
+                pcb87Wireless.getProductId(),
+                switchLinear5Pin.getProductId(),
+                keycapPbt.getProductId()
+        );
+
+        String buildRes = mvc.perform(post("/api/builds/manual")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content(buildBody))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        int buildId = objectMapper.readTree(buildRes).path("data").path("buildId").asInt();
+
+        mvc.perform(post("/api/cart")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content("{\"manualBuildId\":" + buildId + ",\"quantity\":1}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/api/cart").cookie(cookies))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].partDetails.length()").value(4))
+                .andExpect(jsonPath("$.data[0].partDetails[0].partType").value("HOUSING"))
+                .andExpect(jsonPath("$.data[0].partDetails[0].name").value("알루미늄 87 하우징"))
+                .andExpect(jsonPath("$.data[0].partDetails[0].unitPrice").value(100000))
+                .andExpect(jsonPath("$.data[0].partDetails[3].partType").value("KEYCAP"));
+    }
+
+    @Test
+    void resolveDeductAndRestoreCartItemsForOrderHandlesCustomBuildsAndMultipleKeycaps() throws Exception {
+        Cookie[] cookies = signupAndLogin("cart-order-helper@example.com");
+        User user = userRepository.findByEmail("cart-order-helper@example.com").orElseThrow();
+
+        // 커스텀 빌드 1개 + 동일 상품의 서로 다른 디자인 커스텀 키캡 2개 + 빌드 공유 부품 단품 1개 추가
+        String buildBody = """
+                {
+                  "buildName": "주문 연동용 빌드",
+                  "housingProductId": %d,
+                  "pcbProductId": %d,
+                  "switchProductId": %d,
+                  "keycapProductId": %d,
+                  "includeAssembly": true
+                }
+                """.formatted(
+                housing87.getProductId(),
+                pcb87Wireless.getProductId(),
+                switchLinear5Pin.getProductId(),
+                keycapPbt.getProductId()
+        );
+        String buildRes = mvc.perform(post("/api/builds/manual")
+                        .cookie(cookies)
+                        .contentType("application/json")
+                        .content(buildBody))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        int buildId = objectMapper.readTree(buildRes).path("data").path("buildId").asInt();
+
+        mvc.perform(post("/api/cart").cookie(cookies).contentType("application/json")
+                        .content("{\"manualBuildId\":" + buildId + ",\"quantity\":2}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/api/cart").cookie(cookies).contentType("application/json")
+                        .content("{\"productId\":" + switchLinear5Pin.getProductId() + ",\"quantity\":3}"))
+                .andExpect(status().isOk());
+
+        String designA = "{\"keyType\":\"R1\",\"keySize\":\"1u\",\"customText\":\"A\"}";
+        String designB = "{\"keyType\":\"R1\",\"keySize\":\"1u\",\"customText\":\"B\"}";
+        mvc.perform(post("/api/cart").cookie(cookies).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "productId", customKeycap.getProductId(),
+                                "quantity", 1,
+                                "customDesignData", designA
+                        ))))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/cart").cookie(cookies).contentType("application/json")
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "productId", customKeycap.getProductId(),
+                                "quantity", 2,
+                                "customDesignData", designB
+                        ))))
+                .andExpect(status().isOk());
+
+        List<Integer> cartItemIds = cartItemRepository.findByUser_UserId(user.getUserId()).stream()
+                .map(CartItem::getCartItemId)
+                .toList();
+        assertThat(cartItemIds).hasSize(4);
+
+        List<CartOrderLine> lines = cartService.resolveCartItemsForOrder(user.getUserId(), cartItemIds);
+        assertThat(lines).hasSize(4);
+
+        CartOrderLine buildLine = lines.stream()
+                .filter(l -> l.manualBuild() != null)
+                .findFirst().orElseThrow();
+        assertThat(buildLine.unitPrice()).isEqualTo(240_000); // 부품 4종(100+50+30+40=220k) + 공임 20k
+        assertThat(buildLine.stockTargets()).hasSize(4);
+
+        long keycapLineCount = lines.stream()
+                .filter(l -> l.customDesignData() != null)
+                .count();
+        assertThat(keycapLineCount).isEqualTo(2);
+
+        // 재고 차감: switchLinear5Pin 은 빌드(2) + 단품(3) = 총 5개 차감 (10 -> 5), 나머지는 빌드(2) 차감 (10 -> 8)
+        cartService.deductStockForOrderLines(lines);
+        assertThat(switchLinear5Pin.getStockQuantity()).isEqualTo(5);
+        assertThat(housing87.getStockQuantity()).isEqualTo(8);
+        assertThat(customKeycap.getStockQuantity()).isEqualTo(996);
+
+        // 주문 항목 엔티티 형태로 전달 시 빌드 부품 + 단품 재고 복구 확인
+        List<OrderItem> simulatedOrderItems = lines.stream().map(line -> {
+            OrderItem oi = new OrderItem();
+            oi.setProduct(line.product());
+            oi.setManualBuild(line.manualBuild());
+            oi.setAutoBuild(line.autoBuild());
+            oi.setProductNameSnapshot(line.itemNameSnapshot());
+            oi.setOrderedPrice(line.unitPrice());
+            oi.setQuantity(line.quantity());
+            return oi;
+        }).toList();
+        cartService.restoreStockForOrderItems(simulatedOrderItems);
+        assertThat(switchLinear5Pin.getStockQuantity()).isEqualTo(10);
+        assertThat(housing87.getStockQuantity()).isEqualTo(10);
+        assertThat(customKeycap.getStockQuantity()).isEqualTo(999);
+
+        // 누적 수량이 가용 재고를 초과하면 예외 발생 확인 (현재 switchLinear5Pin 재고 10, 장바구니 누적 5 -> 재고를 4로 낮춰 테스트)
+        switchLinear5Pin.setStockQuantity(4);
+        assertThatThrownBy(() -> cartService.resolveCartItemsForOrder(user.getUserId(), cartItemIds))
+                .isInstanceOf(InvalidStateException.class)
+                .hasMessageContaining("재고가 부족합니다");
     }
 }

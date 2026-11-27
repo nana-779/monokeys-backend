@@ -18,7 +18,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/cart")
 @RequiredArgsConstructor
-public class CartController {
+public class    CartController {
     private final CartService cartService;
 
     /**
@@ -74,9 +74,9 @@ public class CartController {
     }
 
     /**
-     * 3. 장바구니 수량 변경 (PATCH /api/cart/{targetId})
+     * 3. 장바구니 수량 변경 (PATCH /api/cart/{targetId}, /api/cart/items/{targetId})
      */
-    @PatchMapping("/{targetId}")
+    @PatchMapping({"/{targetId}", "/items/{targetId}"})
     public ResponseEntity<ApiResponse<String>> updateCartItemQuantity(
             @AuthenticationPrincipal Integer userId,
             @PathVariable int targetId,
@@ -93,9 +93,9 @@ public class CartController {
     }
 
     /**
-     * 4. 장바구니 상품 단건 삭제 (DELETE /api/cart/{targetId})
+     * 4. 장바구니 상품 단건 삭제 (DELETE /api/cart/{targetId}, /api/cart/items/{targetId})
      */
-    @DeleteMapping("/{targetId}")
+    @DeleteMapping({"/{targetId}", "/items/{targetId}"})
     public ResponseEntity<ApiResponse<String>> removeCartItem(
             @AuthenticationPrincipal Integer userId,
             @PathVariable int targetId

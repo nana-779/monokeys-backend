@@ -89,6 +89,8 @@ class OrderRefundHistoryIntegrationTests {
         store.complete(fixture.payment().getPaymentId(), second, cancellation("mock-second-" + second, 300));
         assertThat(currentPayment(fixture).getPaymentStatus()).isEqualTo(Payment.PaymentStatusType.PAID);
         assertThat(currentPayment(fixture).getCancelledAt()).isNull();
+        assertThat(orders.findById(fixture.payment().getOrder().getOrderId()).orElseThrow().getOrderStatus())
+                .isEqualTo(Order.OrderStatusType.ORDERED);
 
         mockMvc.perform(get(HISTORY, fixture.orderNumber()).cookie(cookie(fixture.owner())))
                 .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
@@ -109,7 +111,7 @@ class OrderRefundHistoryIntegrationTests {
         assertThat(currentPayment(fixture).getPaymentStatus()).isEqualTo(Payment.PaymentStatusType.CANCELLED);
         assertThat(currentPayment(fixture).getCancelledAt()).isEqualTo(NOW);
         assertThat(orders.findById(fixture.payment().getOrder().getOrderId()).orElseThrow().getOrderStatus())
-                .isEqualTo(Order.OrderStatusType.ORDERED);
+                .isEqualTo(Order.OrderStatusType.CANCELLED);
 
         mockMvc.perform(get(HISTORY, fixture.orderNumber()).cookie(cookie(fixture.owner())))
                 .andExpect(jsonPath("$.data.status").value("FULL"))
