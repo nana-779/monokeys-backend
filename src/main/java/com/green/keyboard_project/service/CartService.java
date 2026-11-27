@@ -153,7 +153,8 @@ public class CartService {
 
             // 3. 재고 계산 (현재 항목 수정 시 자기 자신 제외하고 잔여 재고 계산)
             Integer excludeId = existingItem.map(CartItem::getCartItemId).orElse(null);
-            int usedByOthers = getUsedQuantityInCart(userId, product.getProductId(), excludeId);
+            List<CartItem> userItems = cartItemRepository.findByUser_UserId(userId);
+            int usedByOthers = calculateUsedQuantityInMemory(userItems, product.getProductId(), excludeId);
             int availableStock = Math.max(0, product.getStockQuantity() - usedByOthers);
 
             if (availableStock <= 0) {
