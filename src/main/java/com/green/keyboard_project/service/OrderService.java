@@ -1,5 +1,6 @@
 package com.green.keyboard_project.service;
 
+import com.green.keyboard_project.dto.cart.CartOrderLine;
 import com.green.keyboard_project.dto.order.MyOrderSummary;
 import com.green.keyboard_project.dto.order.MyOrderDetail;
 import com.green.keyboard_project.dto.order.OrderCreateRequest;
@@ -10,6 +11,8 @@ import com.green.keyboard_project.entity.*;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
+import com.green.keyboard_project.repository.AutoBuildItemRepository;
+import com.green.keyboard_project.repository.ManualBuildItemRepository;
 import com.green.keyboard_project.repository.orders.OrderDeliveryRepository;
 import com.green.keyboard_project.repository.payment.PaymentRepository;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
@@ -35,12 +38,16 @@ import org.springframework.scheduling.annotation.Scheduled;
 public class OrderService {
     private final OrderRepository orderRepository;         // 주문(Order) 데이터 접근 계층
     private final OrderItemRepository orderItemRepository; // 주문 상품(OrderItem) 데이터 접근 계층
-    private final ProductRepository productRepository;     // 상품(Product) 조회 및 재고 갱신용
     private final UserRepository userRepository;           // 주문자 회원(User) 조회용
     private final CartItemRepository cartItemRepository;    // 장바구니(Cart) 조회용
     private final PaymentRepository paymentRepository;     // 결제(Payment) 데이터 접근 계층
     private final TossOrderConfirmClient tossOrderConfirmClient; // 토스페이먼츠 서버 최종 승인 클라이언트
     private final OrderDeliveryRepository orderDeliveryRepository; // order_delivery에 접근
+
+    private final CartService cartService;
+
+    private final ManualBuildItemRepository manualBuildItemRepository;
+    private final AutoBuildItemRepository autoBuildItemRepository;
 
     /**
      * 주문 생성 (주문 및 주문 상품 일괄 저장)
@@ -92,40 +99,33 @@ public class OrderService {
         String uuidPart = UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase();
         String orderNumber = "ORD-" + timePart + "-" + uuidPart;
 
-        // [5] 상품 재고 확인, 재고 차감 및 총 주문 금액 계산
-        int totalProductAmount = 0;
+        // [5] 장바구니 기반 주문 상품 검증 및 엔티티 생성
+        List<Integer> cartItemIds = request.getItems().stream()
+                .map(OrderItemRequest::getCartItemId)
+                .filter(Objects::nonNull)
+                .toList();
+
         List<OrderItem> itemsToSave = new ArrayList<>();
+        int totalProductAmount = 0;
 
-        for (OrderItemRequest itemReq : request.getItems()) {
-            // 상품 조회
-            Product product = productRepository.findById(itemReq.getProductId())
-                    .orElseThrow(() -> new ResourceNotFoundException("상품을 찾을 수 없습니다. (ID: " + itemReq.getProductId() + ")"));
+        if (!cartItemIds.isEmpty()) {
+            // CartService의 고도화된 검증 활용 (단품 재고 + 키보드 빌드 부품 재고 일괄 검증)
+            List<CartOrderLine> resolvedLines =
+                    cartService.resolveCartItemsForOrder(user.getUserId(), cartItemIds);
 
-            if (!product.isActive()) {
-                throw new InvalidStateException(product.getName() + "은(는) 현재 판매중인 상품이 아닙니다.");
+            for (CartOrderLine line : resolvedLines) {
+                totalProductAmount += line.unitPrice() * line.quantity();
+
+                OrderItem orderItem = new OrderItem();
+                orderItem.setProduct(line.product());
+                orderItem.setManualBuild(line.manualBuild());
+                orderItem.setAutoBuild(line.autoBuild());
+                orderItem.setCustomDesignData(line.customDesignData());
+                orderItem.setProductNameSnapshot(line.itemNameSnapshot());
+                orderItem.setOrderedPrice(line.unitPrice());
+                orderItem.setQuantity(line.quantity());
+                itemsToSave.add(orderItem);
             }
-
-            List<CartItem> cartItems = cartItemRepository.findAllByUserAndProduct(user, product);
-            if (cartItems.isEmpty()) {
-                throw new InvalidStateException(product.getName() + "은(는) 장바구니에 담겨있지 않은 상품입니다.");
-            }
-
-            // 재고 수량 확인 (주문서 생성 시에는 재고 차감하지 않고 보유 수량만 검증)
-            if (product.getStockQuantity() < itemReq.getQuantity()) {
-                throw new InvalidStateException("상품 재고가 부족합니다. (" + product.getName() + ", 현재 재고: " + product.getStockQuantity() + "개)");
-            }
-
-            // 단가 및 소계 계산
-            int lineAmount = product.getBasePrice() * itemReq.getQuantity();
-            totalProductAmount += lineAmount;
-
-            // 주문 품목 엔티티 생성 (주문 당시의 상품명, 단가를 스냅샷으로 보존)
-            OrderItem orderItem = new OrderItem();
-            orderItem.setProduct(product);
-            orderItem.setProductNameSnapshot(product.getName());
-            orderItem.setOrderedPrice(product.getBasePrice());
-            orderItem.setQuantity(itemReq.getQuantity());
-            itemsToSave.add(orderItem);
         }
 
         int deliveryFee = 0; // 배송비 정책 (기본 0원)
@@ -298,12 +298,39 @@ public class OrderService {
         // 1-1. 결제 승인 완료 시점에 실제 재고 차감 반영
         List<OrderItem> items = orderItemRepository.findByOrder(order);
         for (OrderItem item : items) {
-            Product product = item.getProduct();
-            if (product != null) {
+            if (item.getQuantity() <= 0) continue;
+
+            if (item.getProduct() != null) {
+                // 단품 재고 차감
+                Product product = item.getProduct();
                 if (product.getStockQuantity() < item.getQuantity()) {
-                    throw new InvalidStateException("상품 재고가 부족하여 결제를 완료할 수 없습니다. (" + product.getName() + ")");
+                    throw new InvalidStateException("상품 재고가 부족합니다. (" + product.getName() +")");
                 }
                 product.setStockQuantity(product.getStockQuantity() - item.getQuantity());
+            } else if (item.getManualBuild() != null) {
+                int buildId = item.getManualBuild().getManualBuildId();
+                var parts = manualBuildItemRepository.findWithProductByManualBuildIds(List.of(buildId));
+                for (var partItem : parts) {
+                    Product partProduct = partItem.getProduct();
+                    if (partProduct != null) {
+                        if (partProduct.getStockQuantity() < item.getQuantity()) {
+                            throw new InvalidStateException("부품 재고가 부족하여 결제를 완료할 수 없습니다. (" + partProduct.getName() + ")");
+                        }
+                        partProduct.setStockQuantity(partProduct.getStockQuantity() - item.getQuantity());
+                    }
+                }
+            } else if (item.getAutoBuild() != null) {
+                int buildId = item.getAutoBuild().getAutoBuildId();
+                var parts = autoBuildItemRepository.findWithProductByAutoBuildIds(List.of(buildId));
+                for (var partItem : parts) {
+                    Product partProduct = partItem.getProduct();
+                    if (partProduct != null) {
+                        if (partProduct.getStockQuantity() < item.getQuantity()) {
+                            throw new InvalidStateException("부품 재고가 부족하여 결제를 완료할 수 없습니다. (" + partProduct.getName() + ")");
+                        }
+                        partProduct.setStockQuantity(partProduct.getStockQuantity() - item.getQuantity());
+                    }
+                }
             }
         }
 
@@ -331,7 +358,23 @@ public class OrderService {
 
         // 4. 결제 성공 시 회원의 장바구니 비우기
         if (order.getUser() != null) {
-            cartItemRepository.deleteByUser(order.getUser());
+            List<CartItem> userCartItems = cartItemRepository.findByUser_UserId(order.getUser().getUserId());
+            for (OrderItem orderItem : items) {
+                for (CartItem cartItem : userCartItems) {
+                    boolean matchProduct = orderItem.getProduct() != null
+                            && cartItem.getProduct() != null
+                            && cartItem.getProduct().getProductId() == orderItem.getProduct().getProductId();
+                    boolean matchManual = orderItem.getManualBuild() != null
+                            && cartItem.getManualBuild() != null
+                            && cartItem.getManualBuild().getManualBuildId() == orderItem.getManualBuild().getManualBuildId();
+                    boolean matchAuto = orderItem.getAutoBuild() != null
+                            && cartItem.getAutoBuild() != null
+                            && cartItem.getAutoBuild().getAutoBuildId() == orderItem.getAutoBuild().getAutoBuildId();
+                    if (matchProduct || matchManual || matchAuto) {
+                        cartItemRepository.delete(cartItem);
+                    }
+                }
+            }
         }
 
         return toOrderResponse(order, items);
