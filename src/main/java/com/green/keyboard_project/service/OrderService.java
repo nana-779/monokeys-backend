@@ -1,5 +1,7 @@
 package com.green.keyboard_project.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.green.keyboard_project.dto.cart.CartOrderLine;
 import com.green.keyboard_project.dto.order.MyOrderSummary;
 import com.green.keyboard_project.dto.order.MyOrderDetail;
@@ -48,6 +50,8 @@ public class OrderService {
 
     private final ManualBuildItemRepository manualBuildItemRepository;
     private final AutoBuildItemRepository autoBuildItemRepository;
+
+    private final ObjectMapper objectMapper;
 
     /**
      * 주문 생성 (주문 및 주문 상품 일괄 저장)
@@ -461,8 +465,8 @@ public class OrderService {
     private String extractThumbnailUrl(OrderItem item, Product product) {
         if (item.getCustomDesignData() != null && !item.getCustomDesignData().isBlank()) {
             try {
-                com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper()
-                        .readTree(item.getCustomDesignData());
+                JsonNode node = objectMapper.readTree(item.getCustomDesignData());
+                
                 String previewUrl = node.path("previewImageUrl").asText(null);
                 if (previewUrl == null || previewUrl.isBlank()) {
                     previewUrl = node.path("printImageUrl").asText(null);
