@@ -10,6 +10,7 @@ import com.green.keyboard_project.dto.order.OrderItemRequest;
 import com.green.keyboard_project.dto.order.OrderItemResponse;
 import com.green.keyboard_project.dto.order.OrderResponse;
 import com.green.keyboard_project.entity.*;
+import com.green.keyboard_project.exceptions.AuthorizationFailureException;
 import com.green.keyboard_project.exceptions.InvalidStateException;
 import com.green.keyboard_project.exceptions.ResourceNotFoundException;
 import com.green.keyboard_project.exceptions.UnauthenticatedException;
@@ -20,7 +21,6 @@ import com.green.keyboard_project.repository.payment.PaymentRepository;
 import com.green.keyboard_project.repository.cart.CartItemRepository;
 import com.green.keyboard_project.repository.orders.OrderItemRepository;
 import com.green.keyboard_project.repository.orders.OrderRepository;
-import com.green.keyboard_project.repository.ProductRepository;
 import com.green.keyboard_project.repository.UserRepository;
 import com.green.keyboard_project.service.payment.TossOrderConfirmClient;
 import lombok.RequiredArgsConstructor;
@@ -195,7 +195,7 @@ public class OrderService {
     public void confirmMyDelivery(Integer userId, String orderNumber) {
         if (userId == null) throw new UnauthenticatedException("로그인이 필요합니다.");
         if (orderDeliveryRepository.confirmMyDelivery(orderNumber, userId) == 0) {
-            throw new InvalidStateException("본인의 배송 중인 주문만 수령 확인할 수 있습니다.");
+            throw new AuthorizationFailureException("본인의 배송 중인 주문만 수령 확인할 수 있습니다.");
         }
     }
 
@@ -262,7 +262,7 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다. (ID: " + orderId + ")"));
         // 본인 주문이 아니면 조회 불가
         if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
-            throw new InvalidStateException("본인의 주문만 조회할 수 있습니다.");
+            throw new AuthorizationFailureException("본인의 주문만 조회할 수 있습니다.");
         }
         List<OrderItem> items = orderItemRepository.findByOrder(order);
         return toOrderResponse(order, items);
@@ -280,7 +280,7 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다. (주문번호: " + orderNumber + ")"));
         // 본인 주문이 아니면 조회 불가
         if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
-            throw new InvalidStateException("본인의 주문만 조회할 수 있습니다.");
+            throw new AuthorizationFailureException("본인의 주문만 조회할 수 있습니다.");
         }
         List<OrderItem> items = orderItemRepository.findByOrder(order);
         return toOrderResponse(order, items);
@@ -298,7 +298,7 @@ public class OrderService {
             throw new UnauthenticatedException("결제 승인을 진행하려면 로그인이 필요합니다.");
         }
         if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
-            throw new InvalidStateException("본인의 주문만 결제를 진행할 수 있습니다.");
+            throw new AuthorizationFailureException("본인의 주문만 결제를 진행할 수 있습니다.");
         }
 
         if (order.getOrderStatus() == Order.OrderStatusType.ORDERED) {
@@ -433,7 +433,7 @@ public class OrderService {
         orderRepository.findByOrderNumber(orderNumber).ifPresent(order -> {
             // 본인 주문이 아니면 취소 불가
             if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
-                throw new InvalidStateException("본인의 주문만 취소 처리할 수 있습니다.");
+                throw new AuthorizationFailureException("본인의 주문만 취소 처리할 수 있습니다.");
             }
             if (order.getOrderStatus() == Order.OrderStatusType.PENDING) {
                 order.setOrderStatus(Order.OrderStatusType.CANCELLED);
