@@ -13,8 +13,10 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 @Entity
-@Table(name = "refund", uniqueConstraints = @UniqueConstraint(name = "uq_refund_pg_cancel_tid",
-        columnNames = "pg_cancel_tid"))
+@Table(name = "refund", uniqueConstraints = @UniqueConstraint(
+        name = "uq_refund_pg_cancel_tid",
+        columnNames = "pg_cancel_tid"
+))
 public class Refund {
 
     @Id
@@ -29,23 +31,50 @@ public class Refund {
     @Column(name = "amount", nullable = false)
     private int amount;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "request_type")
+    private RequestType requestType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "return_reason_type")
+    private ReturnReasonType returnReasonType;
+
     @Column(name = "reason", nullable = false, length = 255)
     private String reason;
 
-    @Column(name = "status", nullable = false)
     @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
     private RefundStatusType status;
 
-    @Column(name = "pg_cancel_tid", nullable = true, length = 200)
+    @Column(name = "rejection_reason", length = 255)
+    private String rejectionReason;
+
+    @Column(name = "pg_cancel_tid", length = 200)
     private String pgCancelTid;
 
     @Column(name = "requested_at", nullable = false)
     private LocalDateTime requestedAt;
 
-    @Column(name = "refunded_at", nullable = true)
+    @Column(name = "refunded_at")
     private LocalDateTime refundedAt;
 
+    public enum RequestType {
+        CANCELLATION,
+        RETURN
+    }
+
+    public enum ReturnReasonType {
+        CHANGE_OF_MIND,
+        DEFECT,
+        WRONG_ITEM
+    }
+
     public enum RefundStatusType {
-        REQUESTED, COMPLETED, REJECTED
+        REQUESTED,
+        COMPLETED,
+        REJECTED,
+        PENDING_APPROVAL,
+        WITHDRAWN,
+        AWAITING_RETURN
     }
 }

@@ -67,6 +67,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/payments/orders/{orderNumber}/refund/history").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/payments/orders/{orderNumber}/refund/cancel",
                                 "/api/payments/orders/{orderNumber}/refund/reconcile").authenticated()
+                        .requestMatchers("/api/payments/orders/{orderNumber}/refund/request",
+                                "/api/payments/orders/{orderNumber}/refund/request/**").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/products/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()

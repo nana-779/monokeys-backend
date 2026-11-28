@@ -70,7 +70,9 @@ public class OrderRefundEligibilityService {
         Integer remainingAmount = completedAmount >= 0 && completedAmount <= paidAmount
                 ? paidAmount - (int) completedAmount : null;
         boolean refundInProgress = history.stream()
-                .anyMatch(refund -> refund.getStatus() == RefundStatusType.REQUESTED);
+                .anyMatch(refund -> refund.getStatus() == RefundStatusType.REQUESTED
+                        || refund.getStatus() == RefundStatusType.PENDING_APPROVAL
+                        || refund.getStatus() == RefundStatusType.AWAITING_RETURN);
         Status status = Status.BLOCKED;
         String message;
 

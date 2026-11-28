@@ -30,7 +30,7 @@ class OrderCancellationStoreTests {
     private final OrderDeliveryRepository deliveries = mock(OrderDeliveryRepository.class);
     private final OrderItemRepository items = mock(OrderItemRepository.class);
     private final EntityManager em = mock(EntityManager.class);
-    private final OrderCancellationStore store = new OrderCancellationStore(orders, payments, refunds, deliveries, items, em);
+    private final OrderCancellationStore store = new OrderCancellationStore(orders, payments, refunds, deliveries, items, em, mock(com.green.keyboard_project.service.CartService.class));
     private final Order order = new Order();
     private final Payment payment = new Payment();
 
@@ -43,7 +43,7 @@ class OrderCancellationStoreTests {
                     assertThat(error.status()).isEqualTo(404);
                     assertThat(error.getMessage()).isEqualTo("주문 또는 결제 정보를 찾을 수 없습니다.");
                 });
-        verifyNoInteractions(payments, refunds, deliveries, items, em);
+        verifyNoInteractions(payments, refunds, deliveries, items, em, mock(com.green.keyboard_project.service.CartService.class));
     }
 
     @Test

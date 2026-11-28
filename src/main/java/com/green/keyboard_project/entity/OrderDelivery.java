@@ -41,8 +41,11 @@ public class OrderDelivery {
     @Column(name = "delivered_at", nullable = true)
     private LocalDateTime deliveredAt;
 
+    @Column(name = "receipt_confirmed_at")
+    private LocalDateTime receiptConfirmedAt;
+
     public enum DeliveryStatusType {
-        PREPARING, SHIPPING, DELIVERED, RETURNED
+        PREPARING, SHIPPING, DELIVERED, CANCELLED, RETURNED
     }
 
 }

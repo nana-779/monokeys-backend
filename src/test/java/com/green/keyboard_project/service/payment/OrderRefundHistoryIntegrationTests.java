@@ -42,6 +42,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -69,6 +72,7 @@ class OrderRefundHistoryIntegrationTests {
     @Autowired PaymentRepository payments;
     @Autowired RefundRepository refunds;
     @Autowired OrderCancellationStore store;
+    @MockitoBean TossCancellationGateway gateway;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -78,6 +82,133 @@ class OrderRefundHistoryIntegrationTests {
         // 테스트 픽스처를 저장하기 전에 전용 H2 이름을 확인합니다.
         assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualToIgnoringCase("refund_history_test");
         mockMvc = MockMvcBuilders.webAppContextSetup(context).addFilters(context.getBean(FilterChainProxy.class)).build();
+    }
+
+    @Test
+    void cancellationRequiresReviewAndRestocksOnceAfterConfirmation() throws Exception {
+        Fixture fixture = payment();
+        var product = workflowItem(fixture, OrderDelivery.DeliveryStatusType.PREPARING);
+        String path = "/api/payments/orders/{number}/refund/request";
+        String payload = """
+                {"type":"CANCELLATION","reason":"단순 변심"}
+                """;
+        mockMvc.perform(post(path, fixture.orderNumber()).cookie(cookie(fixture.owner()))
+                        .header("Origin", "http://localhost:3000").contentType("application/json").content(payload))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.data.status").value("PENDING_APPROVAL"));
+        assertThat(currentPayment(fixture).getPaymentStatus()).isEqualTo(Payment.PaymentStatusType.PAID);
+        assertThat(products.findById(product.getProductId()).orElseThrow().getStockQuantity()).isEqualTo(product.getStockQuantity());
+        mockMvc.perform(get("/api/admin/refund-requests").cookie(cookie(fixture.owner())))
+                .andExpect(status().isForbidden());
+        var response = store.workflow(fixture.orderNumber(), fixture.owner().getUserId());
+        assertThatThrownBy(() -> store.requestWorkflow(fixture.orderNumber(), fixture.owner().getUserId(),
+                new OrderCancellationStore.WorkflowRequest(Refund.RequestType.CANCELLATION, "duplicate", null)))
+                .isInstanceOf(PaymentConfirmationException.class);
+        store.withdrawWorkflow(fixture.orderNumber(), fixture.owner().getUserId(), response.id());
+        assertThatThrownBy(() -> store.inspectWorkflow(response.id(), false))
+                .isInstanceOf(PaymentConfirmationException.class);
+
+        var request = new OrderCancellationStore.WorkflowRequest(Refund.RequestType.CANCELLATION, "다시 요청", null);
+        var rejected = store.requestWorkflow(fixture.orderNumber(), fixture.owner().getUserId(), request);
+        var admin = admin();
+        store.rejectWorkflow(rejected.id(), "반려 테스트");
+        assertThat(store.workflow(fixture.orderNumber(), fixture.owner().getUserId()).rejectionReason()).isEqualTo("반려 테스트");
+        mockMvc.perform(get("/api/admin/refund-requests").cookie(cookie(admin))).andExpect(status().isOk());
+
+        var queued = store.requestWorkflow(fixture.orderNumber(), fixture.owner().getUserId(), request);
+        var reviewPath = "/api/admin/refund-requests/{id}";
+        String approve = """
+                {"action":"APPROVE_CANCELLATION"}
+                """;
+        mockMvc.perform(post(reviewPath, queued.id()).cookie(cookie(fixture.owner()))
+                        .header("Origin", "http://localhost:3000").contentType("application/json").content(approve))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(gateway);
+        var confirmed = stubGateway(fixture, queued);
+        mockMvc.perform(post(reviewPath, queued.id()).cookie(cookie(admin))
+                        .header("Origin", "http://localhost:3000").contentType("application/json").content(approve))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("CANCELLATION_CONFIRMED"));
+        assertThatThrownBy(() -> store.withdrawWorkflow(fixture.orderNumber(), fixture.owner().getUserId(), queued.id()))
+                .isInstanceOf(PaymentConfirmationException.class);
+        store.complete(fixture.payment().getPaymentId(), queued.id(), confirmed);
+        verify(gateway, times(1)).cancel(anyString(), anyString(), isNull(), isNull(), anyString());
+        assertThat(currentPayment(fixture).getPaymentStatus()).isEqualTo(Payment.PaymentStatusType.CANCELLED);
+        assertThat(products.findById(product.getProductId()).orElseThrow().getStockQuantity()).isEqualTo(product.getStockQuantity() + 1);
+    }
+
+    @Test
+    void returnRequiresManualReceiptAndCollectionWithoutRestocking() throws Exception {
+        Fixture fixture = payment();
+        var product = workflowItem(fixture, OrderDelivery.DeliveryStatusType.DELIVERED);
+        var today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        int memberId = fixture.owner().getUserId();
+        var request = new OrderCancellationStore.WorkflowRequest(Refund.RequestType.RETURN, "오배송",
+                Refund.ReturnReasonType.WRONG_ITEM);
+        assertThatThrownBy(() -> store.requestWorkflow(fixture.orderNumber(), memberId, request))
+                .isInstanceOf(PaymentConfirmationException.class);
+        mockMvc.perform(post("/api/orders/me/{orderNumber}/receipt", fixture.orderNumber())
+                        .cookie(cookie(fixture.owner())).header("Origin", "http://localhost:3000"))
+                .andExpect(status().isOk());
+        for (Refund.ReturnReasonType reason : Refund.ReturnReasonType.values()) {
+            int days = reason == Refund.ReturnReasonType.CHANGE_OF_MIND ? 7 : 30;
+            var boundary = new OrderCancellationStore.WorkflowRequest(Refund.RequestType.RETURN, "기한 검증", reason);
+            for (int age : new int[]{days + 1, days}) {
+                jdbc.update("UPDATE order_delivery SET receipt_confirmed_at=? WHERE order_id=?",
+                        today.minusDays(age).atStartOfDay(), fixture.payment().getOrder().getOrderId());
+                if (age > days) assertThatThrownBy(() -> store.requestWorkflow(fixture.orderNumber(), memberId, boundary))
+                        .isInstanceOf(PaymentConfirmationException.class);
+                else store.withdrawWorkflow(fixture.orderNumber(), memberId,
+                        store.requestWorkflow(fixture.orderNumber(), memberId, boundary).id());
+            }
+        }
+        var queued = store.requestWorkflow(fixture.orderNumber(), memberId, request);
+        var admin = admin();
+        assertThat(store.inspectWorkflow(queued.id(), true).refundId()).isEqualTo(queued.id());
+        store.holdReturn(queued.id());
+        assertThat(store.workflow(fixture.orderNumber(), memberId).status()).isEqualTo(Refund.RefundStatusType.AWAITING_RETURN);
+        verifyNoInteractions(gateway);
+        stubGateway(fixture, queued);
+        mockMvc.perform(post("/api/admin/refund-requests/{id}", queued.id()).cookie(cookie(admin))
+                        .header("Origin", "http://localhost:3000").contentType("application/json")
+                        .content("{\"action\":\"RECEIVE_RETURN\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("CANCELLATION_CONFIRMED"));
+        assertThat(products.findById(product.getProductId()).orElseThrow().getStockQuantity()).isEqualTo(product.getStockQuantity());
+        assertThat(deliveries.findByOrder_OrderId(fixture.payment().getOrder().getOrderId()).orElseThrow().getDeliveryStatus())
+                .isEqualTo(OrderDelivery.DeliveryStatusType.RETURNED);
+    }
+
+    private TossCancellationGateway.Cancellation stubGateway(Fixture fixture, OrderCancellationStore.WorkflowView request) {
+        String key = fixture.payment().getPgTid();
+        String reason = request.reason() + " [MK-R" + request.id() + "]";
+        var confirmed = new TossCancellationGateway.Cancellation("workflow-" + request.id(), reason, 1000, CANCELED_AT, "DONE");
+        when(gateway.lookup(key)).thenReturn(new TossCancellationGateway.Snapshot(key, fixture.orderNumber(),
+                "KRW", "DONE", 1000, 1000, true, false, List.of()));
+        when(gateway.cancel(eq(key), eq(reason), isNull(), isNull(), anyString())).thenReturn(
+                new TossCancellationGateway.Snapshot(key, fixture.orderNumber(), "KRW", "CANCELED",
+                        1000, 0, true, false, List.of(confirmed)));
+        return confirmed;
+    }
+
+    private Product workflowItem(Fixture fixture, OrderDelivery.DeliveryStatusType status) {
+        var order = fixture.payment().getOrder();
+        var delivery = new OrderDelivery();
+        delivery.setOrder(order);
+        delivery.setDeliveryStatus(status);
+        deliveries.saveAndFlush(delivery);
+        var product = cartProduct(fixture.owner());
+        var item = new OrderItem();
+        item.setOrder(order);
+        item.setProduct(product);
+        item.setProductNameSnapshot(product.getName());
+        item.setOrderedPrice(1000);
+        item.setQuantity(1);
+        items.saveAndFlush(item);
+        return product;
+    }
+
+    private User admin() {
+        var admin = member();
+        admin.setRole(User.RoleType.ADMIN);
+        return users.saveAndFlush(admin);
     }
 
     @Test
