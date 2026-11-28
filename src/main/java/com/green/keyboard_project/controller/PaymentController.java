@@ -7,6 +7,7 @@ import com.green.keyboard_project.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -25,9 +26,11 @@ public class PaymentController {
      */
     @PostMapping("/complete")
     public ResponseEntity<ApiResponse<OrderResponse>> completePayment(
+            @AuthenticationPrincipal Integer userId,
             @Valid @RequestBody PaymentCompleteRequest request
     ) {
         OrderResponse response = orderService.completePayment(
+                userId,
                 request.getOrderId(),
                 request.getPaymentKey(),
                 request.getAmount()
@@ -41,10 +44,11 @@ public class PaymentController {
      */
     @PostMapping("/fail")
     public ResponseEntity<ApiResponse<String>> failPayment(
+            @AuthenticationPrincipal Integer userId,
             @RequestParam("orderId") String orderId,
             @RequestParam(name = "message", defaultValue = "결제 실패") String message
     ) {
-        orderService.failPayment(orderId, message);
+        orderService.failPayment(userId, orderId, message);
         return ResponseEntity.ok(ApiResponse.ok("결제 실패 처리가 완료되었습니다."));
     }
 }
