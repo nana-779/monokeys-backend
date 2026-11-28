@@ -314,60 +314,25 @@ public class OrderService {
             throw new InvalidStateException("결제 금액이 주문 금액과 일치하지 않습니다. (요청 금액: " + amount + "원, 주문 금액: " + order.getFinalPayAmount() + "원)");
         }
 
-        // 1. 토스페이먼츠 공식 서버 최종 승인 요청 (승인 실패 시 예외 발생 -> 롤백)
+        // 결제 승인 완료 시점에 실제 재고 검사
+        List<OrderItem> items = orderItemRepository.findByOrder(order);
+        // 재고가 검증 및 차감
+        deductStock(items);
+
+        // 재고 확인 완료 후 토스페이먼츠 공식 서버 최종 승인 요청 (승인 실패 시 예외 발생 -> 롤백)
         Payment.PaymentMethodType paymentMethod = tossOrderConfirmClient.confirmPayment(
                 paymentKey,
                 orderNumber,
                 order.getFinalPayAmount()
         );
 
-        // 1-1. 결제 승인 완료 시점에 실제 재고 차감 반영
-        List<OrderItem> items = orderItemRepository.findByOrder(order);
-
         try {
-            for (OrderItem item : items) {
-                if (item.getQuantity() <= 0) continue;
-
-                if (item.getProduct() != null) {
-                    // 단품 재고 차감
-                    Product product = item.getProduct();
-                    if (product.getStockQuantity() < item.getQuantity()) {
-                        throw new InvalidStateException("상품 재고가 부족합니다. (" + product.getName() +")");
-                    }
-                    product.setStockQuantity(product.getStockQuantity() - item.getQuantity());
-                } else if (item.getManualBuild() != null) {
-                    int buildId = item.getManualBuild().getManualBuildId();
-                    var parts = manualBuildItemRepository.findWithProductByManualBuildIds(List.of(buildId));
-                    for (var partItem : parts) {
-                        Product partProduct = partItem.getProduct();
-                        if (partProduct != null) {
-                            if (partProduct.getStockQuantity() < item.getQuantity()) {
-                                throw new InvalidStateException("부품 재고가 부족하여 결제를 완료할 수 없습니다. (" + partProduct.getName() + ")");
-                            }
-                            partProduct.setStockQuantity(partProduct.getStockQuantity() - item.getQuantity());
-                        }
-                    }
-                } else if (item.getAutoBuild() != null) {
-                    int buildId = item.getAutoBuild().getAutoBuildId();
-                    var parts = autoBuildItemRepository.findWithProductByAutoBuildIds(List.of(buildId));
-                    for (var partItem : parts) {
-                        Product partProduct = partItem.getProduct();
-                        if (partProduct != null) {
-                            if (partProduct.getStockQuantity() < item.getQuantity()) {
-                                throw new InvalidStateException("부품 재고가 부족하여 결제를 완료할 수 없습니다. (" + partProduct.getName() + ")");
-                            }
-                            partProduct.setStockQuantity(partProduct.getStockQuantity() - item.getQuantity());
-                        }
-                    }
-                }
-            }
-
-            // 2. 주문 상태를 결제 완료(ORDERED)로 변경 및 결제 승인 시각 기록
+            // 주문 상태를 결제 완료(ORDERED)로 변경 및 결제 승인 시각 기록
             order.setOrderStatus(Order.OrderStatusType.ORDERED);
             order.setOrderedAt(LocalDateTime.now());
             orderRepository.save(order);
 
-            // 3. 결제(Payment) 이력 저장
+            // 결제(Payment) 이력 저장
             Payment payment = new Payment();
             payment.setOrder(order);
             payment.setPaymentMethod(paymentMethod);
@@ -384,7 +349,7 @@ public class OrderService {
             delivery.setDeliveryStatus(OrderDelivery.DeliveryStatusType.PREPARING);
             orderDeliveryRepository.save(delivery);
 
-            // 4. 결제 성공 시 회원의 장바구니 비우기
+            // 결제 성공 시 회원의 장바구니 비우기
             if (order.getUser() != null) {
                 List<CartItem> userCartItems = cartItemRepository.findByUser_UserId(order.getUser().getUserId());
                 for (OrderItem orderItem : items) {
@@ -498,5 +463,44 @@ public class OrderService {
             }
         }
         return product != null ? product.getThumbnailUrl() : null;
+    }
+
+    /**
+     * 주문 품목들의 재고 검증 및 차감 (단품, 수동 빌드 부품, 자동 빌드 부품 일괄 처리)
+     */
+    private void deductStock(List<OrderItem> items) {
+        for (OrderItem item : items) {
+            int qty = item.getQuantity();
+            if (qty <= 0) continue;
+            // 1. 단품 상품
+            if (item.getProduct() != null) {
+                deductProductStock(item.getProduct(), qty);
+            }
+            // 2. 수동 조립 키보드 부품
+            else if (item.getManualBuild() != null) {
+                var parts = manualBuildItemRepository.findWithProductByManualBuildIds(
+                        List.of(item.getManualBuild().getManualBuildId())
+                );
+                for (var part : parts) {
+                    deductProductStock(part.getProduct(), qty);
+                }
+            }
+            // 3. 자동 추천 키보드 부품
+            else if (item.getAutoBuild() != null) {
+                var parts = autoBuildItemRepository.findWithProductByAutoBuildIds(
+                        List.of(item.getAutoBuild().getAutoBuildId())
+                );
+                for (var part : parts) {
+                    deductProductStock(part.getProduct(), qty);
+                }
+            }
+        }
+    }
+    private void deductProductStock(Product product, int quantity) {
+        if (product == null) return;
+        if (product.getStockQuantity() < quantity) {
+            throw new InvalidStateException("상품 재고가 부족합니다. (" + product.getName() + ")");
+        }
+        product.setStockQuantity(product.getStockQuantity() - quantity);
     }
 }
