@@ -196,7 +196,7 @@ public class OrderService {
     public void confirmMyDelivery(Integer userId, String orderNumber) {
         if (userId == null) throw new UnauthenticatedException("로그인이 필요합니다.");
         if (orderDeliveryRepository.confirmMyDelivery(orderNumber, userId) == 0) {
-            throw new InvalidStateException("본인의 배송 중이거나 배송 완료된 주문만 한 번 수령 확인할 수 있습니다.");
+            throw new InvalidStateException("수령 확인을 할 수 없는 주문입니다.");
         }
     }
 
