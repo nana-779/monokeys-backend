@@ -51,7 +51,7 @@ public class OrderService {
     private final ManualBuildItemRepository manualBuildItemRepository;
     private final AutoBuildItemRepository autoBuildItemRepository;
 
-    private final ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 주문 생성 (주문 및 주문 상품 일괄 저장)
