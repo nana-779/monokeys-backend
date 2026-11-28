@@ -261,7 +261,7 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다. (ID: " + orderId + ")"));
         // 본인 주문이 아니면 조회 불가
-        if (order.getUser() != null && !Objects.equals(order.getUser().getUserId(), userId)) {
+        if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
             throw new InvalidStateException("본인의 주문만 조회할 수 있습니다.");
         }
         List<OrderItem> items = orderItemRepository.findByOrder(order);
@@ -279,7 +279,7 @@ public class OrderService {
         Order order = orderRepository.findByOrderNumber(orderNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다. (주문번호: " + orderNumber + ")"));
         // 본인 주문이 아니면 조회 불가
-        if (order.getUser() != null && !Objects.equals(order.getUser().getUserId(), userId)) {
+        if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
             throw new InvalidStateException("본인의 주문만 조회할 수 있습니다.");
         }
         List<OrderItem> items = orderItemRepository.findByOrder(order);
@@ -294,13 +294,11 @@ public class OrderService {
         Order order = orderRepository.findByOrderNumber(orderNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("주문 정보를 찾을 수 없습니다."));
 
-        if (order.getUser() != null) {
-            if (userId == null) {
-                throw new UnauthenticatedException("결제 승인을 진행하려면 로그인이 필요합니다.");
-            }
-            if (order.getUser().getUserId() != userId) {
-                throw new InvalidStateException("본인의 주문만 결제를 진행할 수 있습니다.");
-            }
+        if (userId == null) {
+            throw new UnauthenticatedException("결제 승인을 진행하려면 로그인이 필요합니다.");
+        }
+        if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
+            throw new InvalidStateException("본인의 주문만 결제를 진행할 수 있습니다.");
         }
 
         if (order.getOrderStatus() == Order.OrderStatusType.ORDERED) {
@@ -434,7 +432,7 @@ public class OrderService {
         }
         orderRepository.findByOrderNumber(orderNumber).ifPresent(order -> {
             // 본인 주문이 아니면 취소 불가
-            if (order.getUser() != null && !Objects.equals(order.getUser().getUserId(), userId)) {
+            if (order.getUser() == null || !Objects.equals(order.getUser().getUserId(), userId)) {
                 throw new InvalidStateException("본인의 주문만 취소 처리할 수 있습니다.");
             }
             if (order.getOrderStatus() == Order.OrderStatusType.PENDING) {
