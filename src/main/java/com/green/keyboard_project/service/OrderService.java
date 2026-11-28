@@ -219,10 +219,12 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다."));
         var order = orderRepository.findByOrderNumberAndUser_UserIdAndUser_IsDeletedFalse(orderNumber, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다."));
+        var delivery = orderDeliveryRepository.findByOrder_OrderId(order.getOrderId()).orElse(null);
         return new MyOrderDetail(summary, order.getOrdererName(), order.getOrdererPhone(),
                 order.getPostalCode(), order.getRoadAddress(), order.getDetailAddress(),
-                orderDeliveryRepository.findByOrder_OrderId(order.getOrderId())
-                        .map(delivery -> delivery.getReceiptConfirmedAt() != null).orElse(false));
+                delivery != null && delivery.getReceiptConfirmedAt() != null,
+                delivery == null ? null : delivery.getTrackingCompany(),
+                delivery == null ? null : delivery.getTrackingNumber());
     }
 
     private List<MyOrderSummary> readMyOrders(Integer userId, String orderNumber) {
