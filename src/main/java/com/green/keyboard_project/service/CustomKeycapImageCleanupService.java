@@ -51,7 +51,7 @@ public class CustomKeycapImageCleanupService {
             return false;
         }
         String filename = filenameOpt.get();
-        if (isReferencedInCart(filename)) {
+        if (isReferenced(filename)) {
             return false;
         }
         Path baseDir = imageStorageService.getCustomKeycapDirectory().toAbsolutePath().normalize();
@@ -101,7 +101,7 @@ public class CustomKeycapImageCleanupService {
                 if (lastModified.isAfter(cutoff)) {
                     continue;
                 }
-                if (isReferencedInCart(filename)) {
+                if (isReferenced(filename)) {
                     continue;
                 }
                 if (Files.deleteIfExists(file)) {
@@ -118,14 +118,25 @@ public class CustomKeycapImageCleanupService {
         return deletedCount;
     }
 
-    private boolean isReferencedInCart(String filename) {
-        Long count = entityManager.createQuery(
+    private boolean isReferenced(String filename) {
+        // 장바구니에 담겨 있는지 확인
+        Long cartCount = entityManager.createQuery(
                         "SELECT COUNT(c) FROM CartItem c WHERE c.customDesignData LIKE :pattern",
                         Long.class
                 )
                 .setParameter("pattern", "%" + filename + "%")
                 .getSingleResult();
-        return count != null && count > 0;
+        if (cartCount != null && cartCount > 0) {
+            return true;
+        }
+        // 이미 결제/주문 완료된 주문 품목에 포함되어 있는지 확인
+        Long orderCount = entityManager.createQuery(
+                        "SELECT COUNT(o) FROM OrderItem o WHERE o.customDesignData LIKE :pattern",
+                        Long.class
+                )
+                .setParameter("pattern", "%" + filename + "%")
+                .getSingleResult();
+        return orderCount != null && orderCount > 0;
     }
 
     private Optional<String> extractCustomKeycapFilename(String imageUrl) {

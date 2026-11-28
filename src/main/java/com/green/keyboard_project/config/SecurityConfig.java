@@ -58,6 +58,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/orders/{orderId}", "/api/orders/number/{orderNumber}").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/orders/me/{orderNumber}/receipt").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/orders/me", "/api/orders/me/{orderNumber}").authenticated()
+                        // 장바구니 및 커스텀 키캡 업로드/삭제 API 보호
+                        .requestMatchers("/api/cart/**", "/api/custom-keycaps/**").authenticated()
                         // 결제 승인 및 실패/취소 통지 API 보호
                         .requestMatchers(HttpMethod.POST, "/api/payments/complete", "/api/payments/fail").authenticated()
                         // 환불 관련 API 보호
