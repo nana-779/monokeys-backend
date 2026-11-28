@@ -44,10 +44,11 @@ public class PaymentController {
      */
     @PostMapping("/fail")
     public ResponseEntity<ApiResponse<String>> failPayment(
+            @AuthenticationPrincipal Integer userId,
             @RequestParam("orderId") String orderId,
             @RequestParam(name = "message", defaultValue = "결제 실패") String message
     ) {
-        orderService.failPayment(orderId, message);
+        orderService.failPayment(userId, orderId, message);
         return ResponseEntity.ok(ApiResponse.ok("결제 실패 처리가 완료되었습니다."));
     }
 }

@@ -254,10 +254,16 @@ public class OrderService {
      * 주문 단건 조회 (주문 ID 기준)
      */
     @Transactional(readOnly = true)
-    public OrderResponse getOrderById(int orderId) {
+    public OrderResponse getOrderById(Integer userId, int orderId) {
+        if (userId == null) {
+            throw new UnauthenticatedException("주문을 조회하려면 로그인이 필요합니다.");
+        }
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다. (ID: " + orderId + ")"));
-
+        // 본인 주문이 아니면 조회 불가
+        if (order.getUser() != null && !Objects.equals(order.getUser().getUserId(), userId)) {
+            throw new InvalidStateException("본인의 주문만 조회할 수 있습니다.");
+        }
         List<OrderItem> items = orderItemRepository.findByOrder(order);
         return toOrderResponse(order, items);
     }
@@ -266,10 +272,16 @@ public class OrderService {
      * 주문 단건 조회 (주문번호 기준)
      */
     @Transactional(readOnly = true)
-    public OrderResponse getOrderByOrderNumber(String orderNumber) {
+    public OrderResponse getOrderByOrderNumber(Integer userId, String orderNumber) {
+        if (userId == null) {
+            throw new UnauthenticatedException("주문을 조회하려면 로그인이 필요합니다.");
+        }
         Order order = orderRepository.findByOrderNumber(orderNumber)
                 .orElseThrow(() -> new ResourceNotFoundException("주문을 찾을 수 없습니다. (주문번호: " + orderNumber + ")"));
-
+        // 본인 주문이 아니면 조회 불가
+        if (order.getUser() != null && !Objects.equals(order.getUser().getUserId(), userId)) {
+            throw new InvalidStateException("본인의 주문만 조회할 수 있습니다.");
+        }
         List<OrderItem> items = orderItemRepository.findByOrder(order);
         return toOrderResponse(order, items);
     }
@@ -416,8 +428,15 @@ public class OrderService {
      * 결제 실패 또는 중간 취소 시 주문 상태를 CANCELLED(취소됨)로 변경
      */
     @Transactional
-    public void failPayment(String orderNumber, String reason) {
+    public void failPayment(Integer userId, String orderNumber, String reason) {
+        if (userId == null) {
+            throw new UnauthenticatedException("결제 취소를 진행하려면 로그인이 필요합니다.");
+        }
         orderRepository.findByOrderNumber(orderNumber).ifPresent(order -> {
+            // 본인 주문이 아니면 취소 불가
+            if (order.getUser() != null && !Objects.equals(order.getUser().getUserId(), userId)) {
+                throw new InvalidStateException("본인의 주문만 취소 처리할 수 있습니다.");
+            }
             if (order.getOrderStatus() == Order.OrderStatusType.PENDING) {
                 order.setOrderStatus(Order.OrderStatusType.CANCELLED);
                 orderRepository.save(order);

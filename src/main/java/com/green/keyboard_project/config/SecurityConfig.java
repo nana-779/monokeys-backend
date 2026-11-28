@@ -51,20 +51,25 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/me").authenticated()
                         // 회원정보 수정·비밀번호 변경·비밀번호 재확인·회원탈퇴는 로그인한 회원만 접근합니다.
                         .requestMatchers("/api/users/me", "/api/users/me/**").authenticated()
-                        // 마이페이지 주문 목록은 인증된 회원에게만 열어 둡니다.
+                        // 전체 주문 목록 조회는 관리자(ADMIN)만 접근 가능
+                        .requestMatchers(HttpMethod.GET, "/api/orders").hasRole("ADMIN")
+                        // 주문 생성 및 단건 조회, 마이페이지 주문은 인증된 회원만 접근 가능
+                        .requestMatchers(HttpMethod.POST, "/api/orders").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/orders/{orderId}", "/api/orders/number/{orderNumber}").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/orders/me/{orderNumber}/receipt").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/orders/me", "/api/orders/me/{orderNumber}").authenticated()
-                        // 환불 사전 조회는 회원만 접근하며, 서비스에서 해당 회원의 주문인지 확인합니다.
+                        // 결제 승인 및 실패/취소 통지 API 보호
+                        .requestMatchers(HttpMethod.POST, "/api/payments/complete", "/api/payments/fail").authenticated()
+                        // 환불 관련 API 보호
                         .requestMatchers("/api/payments/orders/{orderNumber}/refund/eligibility").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/payments/orders/{orderNumber}/refund/history").authenticated()
-                        // 신규 취소 요청만 보호합니다. 기존 승인과 실패 통지 경로의 규칙에는 영향을 주지 않습니다.
                         .requestMatchers(HttpMethod.POST, "/api/payments/orders/{orderNumber}/refund/cancel",
                                 "/api/payments/orders/{orderNumber}/refund/reconcile").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/products/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
-                        // TODO: 보호 페이지 목록(회의 안건) 확정 후 장바구니·주문·마이페이지 API 추가
-                        .anyRequest().permitAll())
+                        .anyRequest().permitAll()
+                )
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> writeError(res, 401, "로그인이 필요합니다."))
                         .accessDeniedHandler((req, res, ex) -> writeError(res, 403, "접근 권한이 없습니다.")))
