@@ -18,6 +18,12 @@ import lombok.Setter;
 public class OrderItemResponse {
     private int orderItemId;       // 주문 상품 식별자 (PK)
     private Integer productId;     // 원본 상품 식별자
+
+    // 커스텀 빌드 및 키캡 디자인 필드
+    private Integer manualBuildId;
+    private Integer autoBuildId;
+    private String customDesignData;
+
     private String productName;    // 주문 당시의 상품명 스냅샷
     private int unitPrice;         // 주문 당시의 상품 단가
     private int quantity;          // 주문 수량

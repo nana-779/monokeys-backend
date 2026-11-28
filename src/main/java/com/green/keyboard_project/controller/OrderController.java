@@ -74,9 +74,10 @@ public class OrderController {
      */
     @GetMapping("/{orderId}")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrderById(
+            @AuthenticationPrincipal Integer userId,
             @PathVariable int orderId
     ) {
-        OrderResponse response = orderService.getOrderById(orderId);
+        OrderResponse response = orderService.getOrderById(userId, orderId);
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 
@@ -86,9 +87,10 @@ public class OrderController {
      */
     @GetMapping("/number/{orderNumber}")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrderByOrderNumber(
+            @AuthenticationPrincipal Integer userId,
             @PathVariable String orderNumber
     ) {
-        OrderResponse response = orderService.getOrderByOrderNumber(orderNumber);
+        OrderResponse response = orderService.getOrderByOrderNumber(userId, orderNumber);
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 }
